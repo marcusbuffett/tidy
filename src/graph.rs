@@ -99,6 +99,7 @@ pub fn build(project: &Project, resolvers: &Resolvers, workspaces_dirs: &[PathBu
         .par_iter()
         .enumerate()
         .map(|(i, f)| {
+            let t = std::time::Instant::now();
             let mut facts = if is_code(&f.path) {
                 match std::fs::read_to_string(&f.path) {
                     Ok(src) => extract::extract(&f.path, &src, f.is_config),
@@ -112,6 +113,10 @@ pub fn build(project: &Project, resolvers: &Resolvers, workspaces_dirs: &[PathBu
             };
             if f.is_config {
                 add_config_refs(&mut facts);
+            }
+            let ms = t.elapsed().as_secs_f64() * 1000.0;
+            if ms > 3.0 && std::env::var_os("TIDY_DEBUG_PARSE").is_some() {
+                eprintln!("slow parse {ms:.1}ms {} ({} bytes)", f.rel, std::fs::metadata(&f.path).map(|m| m.len()).unwrap_or(0));
             }
             (i, facts)
         })
@@ -141,6 +146,7 @@ pub fn build(project: &Project, resolvers: &Resolvers, workspaces_dirs: &[PathBu
     }
     let parsed_files = modules.len();
     let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    crate::perf("parse:project", t0);
 
     // Resolve imports; newly discovered internal files are parsed and resolved in further rounds.
     let t1 = std::time::Instant::now();
@@ -186,11 +192,17 @@ pub fn build(project: &Project, resolvers: &Resolvers, workspaces_dirs: &[PathBu
         let parsed: Vec<(PathBuf, FileFacts)> = new_paths
             .into_par_iter()
             .map(|p| {
+                let t = std::time::Instant::now();
                 let facts = if is_code(&p) { std::fs::read_to_string(&p).map(|s| extract::extract_light(&p, &s)).unwrap_or_default() } else { FileFacts::default() };
+                let ms = t.elapsed().as_secs_f64() * 1000.0;
+                if ms > 3.0 && std::env::var_os("TIDY_DEBUG_PARSE").is_some() {
+                    eprintln!("slow parse {ms:.1}ms {} ({} bytes)", p.display(), std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0));
+                }
                 (p, facts)
             })
             .collect();
         parse_extra_ms += tp.elapsed().as_secs_f64() * 1000.0;
+        crate::perf("parse:extra-round", tp);
         pending.clear();
         for (p, facts) in parsed {
             let ws = workspace_for(&p, workspaces_dirs);

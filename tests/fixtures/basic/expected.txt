@@ -1,0 +1,22 @@
+files packages/ui/src/Orphan.tsx:0:0
+files src/lib/dead.ts:0:0
+dependencies package.json:10:86 unused-dep
+dependencies packages/shared/package.json:1:124 lodash
+devDependencies package.json:11:72 @testing-library/react
+devDependencies package.json:11:133 unused-dev-dep
+unlisted src/cli.ts:5:1 unlisted-pkg
+binaries package.json:0:0 eslint
+unresolved src/cli.ts:6:1 ./lib/does-not-exist
+exports src/lib/api.ts:2:23 fetchOne
+exports src/lib/colors.ts:2:14 blue
+exports src/lib/colors.ts:3:14 green
+exports src/lib/commands.ts:2:20 unusedReexport
+exports src/lib/page.ts:2:17 unrendered
+exports src/lib/runner.ts:3:17 stop
+exports src/lib/util.ts:2:17 untraced
+types src/lib/math.ts:4:13 Vector
+types src/lib/math.ts:5:18 Shape
+types src/lib/status.ts:2:13 Unused
+types src/types/user.ts:2:13 Admin
+enumMembers src/lib/status.ts:1:13 Status.Deleted
+enumMembers src/lib/status.ts:1:13 Status.Inactive

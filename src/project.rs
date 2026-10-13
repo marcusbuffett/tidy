@@ -40,6 +40,8 @@ pub struct WorkspaceSetup {
     pub config: PatternSet,
     pub exact_entries: FxHashSet<String>,
     pub enabled_tools: Vec<usize>,
+    /// Enabled tools that have a config file in this workspace (their enabler package is in use).
+    pub tools_with_config: Vec<usize>,
     pub ignore_dependencies: Vec<crate::config::NameMatcher>,
     pub ignore_binaries: Vec<crate::config::NameMatcher>,
     pub ignore_unresolved: Vec<crate::config::NameMatcher>,
@@ -200,43 +202,96 @@ fn tsconfig_dts_patterns(dir: &Path) -> Option<(PatternSet, PatternSet)> {
 }
 
 pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production: bool) -> Result<Project> {
+    let t = std::time::Instant::now();
     let all = walk(root);
+    crate::perf("walk", t);
+    let t = std::time::Instant::now();
     let all_rel: Vec<String> = all.iter().map(|p| rel_posix(root, p)).collect();
 
-    // Assign files to the deepest workspace.
-    let mut ws_by_depth: Vec<usize> = (0..workspaces.len()).collect();
-    ws_by_depth.sort_by_key(|&i| std::cmp::Reverse(workspaces[i].dir.components().count()));
-    let assign = |p: &Path| -> usize {
-        for &i in &ws_by_depth {
-            if p.starts_with(&workspaces[i].dir) {
-                return i;
-            }
+    // Assign files to the deepest workspace: walk up parent directories with a dir → workspace map,
+    // memoising per directory.
+    let ws_dirs: FxHashMap<&Path, usize> = workspaces.iter().enumerate().map(|(i, w)| (w.dir.as_path(), i)).collect();
+    let mut dir_ws: FxHashMap<PathBuf, usize> = FxHashMap::default();
+    let mut file_ws: Vec<usize> = Vec::with_capacity(all.len());
+    for p in &all {
+        let dir = p.parent().unwrap_or(root);
+        if let Some(&w) = dir_ws.get(dir) {
+            file_ws.push(w);
+            continue;
         }
-        0
-    };
-    let file_ws: Vec<usize> = all.iter().map(|p| assign(p)).collect();
+        let mut cur = Some(dir);
+        let mut found = 0;
+        let mut visited: Vec<&Path> = Vec::new();
+        while let Some(d) = cur {
+            if let Some(&w) = dir_ws.get(d) {
+                found = w;
+                break;
+            }
+            visited.push(d);
+            if let Some(&w) = ws_dirs.get(d) {
+                found = w;
+                break;
+            }
+            if d == root {
+                break;
+            }
+            cur = d.parent();
+        }
+        for d in visited {
+            dir_ws.insert(d.to_path_buf(), found);
+        }
+        file_ws.push(found);
+    }
 
     // Root-level ignore applies to all workspaces (root-relative).
     let root_ignore = PatternSet::new(&cfg.root.ignore.as_ref().map(|s| s.to_vec()).unwrap_or_default())?;
     let negated_ws = PatternSet::new(&crate::workspace::negated_globs(root))?;
     let ignore_ws_set = patterns::build_set(&cfg.ignore_workspaces)?;
 
-    // Tool config globsets (shared).
-    let tool_config_sets: Vec<globset::GlobSet> =
-        TOOLS.iter().map(|t| patterns::build_set(&t.config.iter().map(|s| s.to_string()).collect::<Vec<_>>())).collect::<Result<_>>()?;
-
-    // Pass A: which tools have config files present per workspace.
-    let mut config_present: Vec<FxHashSet<usize>> = vec![FxHashSet::default(); workspaces.len()];
-    for (i, p) in all.iter().enumerate() {
-        let ws = file_ws[i];
-        let ws_rel = rel_posix(&workspaces[ws].dir, p);
-        for (t, set) in tool_config_sets.iter().enumerate() {
-            if set.is_match(&ws_rel) {
-                config_present[ws].insert(t);
+    // One combined globset over every tool's config patterns: a single match per file tells which tools.
+    let mut combined = globset::GlobSetBuilder::new();
+    let mut glob_tool: Vec<usize> = Vec::new();
+    for (ti, t) in TOOLS.iter().enumerate() {
+        for c in t.config {
+            for e in patterns::expand_braces(&patterns::normalize_glob(c)) {
+                combined.add(globset::GlobBuilder::new(&e).literal_separator(true).build()?);
+                glob_tool.push(ti);
+            }
+        }
+    }
+    let combined = combined.build()?;
+    // Pre-filter by basename: most config patterns end in a literal file name.
+    let mut literal_names: FxHashSet<String> = FxHashSet::default();
+    let mut has_wildcard_tail = false;
+    for t in TOOLS {
+        for c in t.config {
+            for e in patterns::expand_braces(&patterns::normalize_glob(c)) {
+                let tail = e.rsplit('/').next().unwrap_or(&e).to_string();
+                if tail.contains(['*', '?', '[']) {
+                    has_wildcard_tail = true;
+                } else {
+                    literal_names.insert(tail);
+                }
             }
         }
     }
 
+    // Pass A: which tools have config files present per workspace.
+    let mut config_present: Vec<FxHashSet<usize>> = vec![FxHashSet::default(); workspaces.len()];
+    let ws_rels: Vec<String> = all.iter().enumerate().map(|(i, p)| rel_posix(&workspaces[file_ws[i]].dir, p)).collect();
+    for (i, ws_rel) in ws_rels.iter().enumerate() {
+        let base = ws_rel.rsplit('/').next().unwrap_or(ws_rel);
+        let candidate = literal_names.contains(base) || (has_wildcard_tail && (ws_rel.starts_with('.') || ws_rel.contains("/.") || ws_rel.ends_with(".prisma") || ws_rel.ends_with(".yml") || ws_rel.ends_with(".yaml")));
+        if !candidate {
+            continue;
+        }
+        for gi in combined.matches(ws_rel) {
+            config_present[file_ws[i]].insert(glob_tool[gi]);
+        }
+    }
+
+    crate::perf("assign+toolscan", t);
+    let t = std::time::Instant::now();
     let default_entry: Vec<String> = ["{index,cli,main}.{js,mjs,cjs,jsx,ts,tsx,mts,cts}", "src/{index,cli,main}.{js,mjs,cjs,jsx,ts,tsx,mts,cts}"].iter().map(|s| s.to_string()).collect();
     let default_project: Vec<String> = vec!["**/*.{js,mjs,cjs,jsx,ts,tsx,mts,cts}".into()];
 
@@ -359,6 +414,7 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
             ignore: PatternSet::new(&ignore)?,
             config: PatternSet::new(&config)?,
             exact_entries,
+            tools_with_config: enabled_tools.iter().copied().filter(|t| config_present[wi].contains(t)).collect(),
             enabled_tools,
             ignore_dependencies,
             ignore_binaries,
@@ -369,6 +425,8 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
         });
     }
 
+    crate::perf("setups", t);
+    let t = std::time::Instant::now();
     // Pass B: classify.
     let mut files = Vec::with_capacity(all.len());
     for (i, p) in all.into_iter().enumerate() {
@@ -377,7 +435,7 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
         if negated_ws.is_match(&rel) {
             continue;
         }
-        let ws_rel = rel_posix(&workspaces[ws].dir, &p);
+        let ws_rel = ws_rels[i].clone();
         let s = &setups[ws];
         let is_ignored = root_ignore.is_match(&rel) || s.ignore.is_match(&ws_rel) || s.is_ignored_workspace;
         let is_config = s.config.is_match(&ws_rel);
@@ -393,5 +451,6 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
         }
         files.push(ProjectFile { path: p, rel, ws_rel, ws, is_project, is_entry, is_config, is_ignored, dev_entry: !user_entry && !tool && dev, tool_entry: !user_entry && (tool || dev || is_config) });
     }
+    crate::perf("classify", t);
     Ok(Project { root: root.to_path_buf(), files, setups, all_rel })
 }

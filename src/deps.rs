@@ -61,14 +61,28 @@ struct Installed {
 struct InstalledCache {
     root: std::path::PathBuf,
     map: std::sync::Mutex<FxHashMap<std::path::PathBuf, std::sync::Arc<Installed>>>,
+    /// (from_dir, name) → result, so repeated lookups never touch the file system.
+    by_query: std::sync::Mutex<FxHashMap<(std::path::PathBuf, String), Option<std::sync::Arc<Installed>>>>,
 }
 
 impl InstalledCache {
     fn get(&self, from_dir: &Path, name: &str) -> Option<std::sync::Arc<Installed>> {
+        let key = (from_dir.to_path_buf(), name.to_string());
+        if let Some(v) = self.by_query.lock().unwrap().get(&key) {
+            return v.clone();
+        }
+        let v = self.get_uncached(from_dir, name);
+        self.by_query.lock().unwrap().insert(key, v.clone());
+        v
+    }
+
+    fn get_uncached(&self, from_dir: &Path, name: &str) -> Option<std::sync::Arc<Installed>> {
         let mut cur = Some(from_dir);
         while let Some(d) = cur {
             let pj = d.join("node_modules").join(name).join("package.json");
             if pj.is_file() {
+                // symlinked installs (pnpm, workspaces) share one real file
+                let pj = std::fs::canonicalize(&pj).unwrap_or(pj);
                 if let Some(v) = self.map.lock().unwrap().get(&pj) {
                     return Some(v.clone());
                 }
@@ -114,14 +128,28 @@ fn chain(ws: usize, workspaces: &[Workspace]) -> Vec<usize> {
 
 /// Binary name → package name from `node_modules/.bin` symlinks in dir and ancestors.
 fn bin_providers(dir: &Path, root: &Path) -> FxHashMap<String, String> {
+    use std::sync::{Mutex, OnceLock};
+    static DIR_CACHE: OnceLock<Mutex<FxHashMap<std::path::PathBuf, FxHashMap<String, String>>>> = OnceLock::new();
+    let cache = DIR_CACHE.get_or_init(|| Mutex::new(FxHashMap::default()));
     let mut out = FxHashMap::default();
     let mut cur = Some(dir);
     while let Some(d) = cur {
         let bin = d.join("node_modules/.bin");
+        if let Some(m) = cache.lock().unwrap().get(&bin) {
+            for (k, v) in m {
+                out.entry(k.clone()).or_insert_with(|| v.clone());
+            }
+            if d == root {
+                break;
+            }
+            cur = d.parent();
+            continue;
+        }
+        let mut local: FxHashMap<String, String> = FxHashMap::default();
         if let Ok(rd) = std::fs::read_dir(&bin) {
             for e in rd.flatten() {
                 let name = e.file_name().to_string_lossy().to_string();
-                if out.contains_key(&name) {
+                if local.contains_key(&name) {
                     continue;
                 }
                 if let Ok(target) = std::fs::read_link(e.path()) {
@@ -136,10 +164,14 @@ fn bin_providers(dir: &Path, root: &Path) -> FxHashMap<String, String> {
                         Some(s) => s.to_string(),
                         None => continue,
                     };
-                    out.insert(name, pkg);
+                    local.insert(name, pkg);
                 }
             }
         }
+        for (k, v) in &local {
+            out.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+        cache.lock().unwrap().insert(bin, local);
         if d == root {
             break;
         }
@@ -194,10 +226,15 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
     let chains: Vec<Vec<usize>> = (0..n).map(|i| chain(i, workspaces)).collect();
     let ws_names: FxHashSet<&str> = workspaces.iter().filter_map(|w| w.pkg_name()).collect();
 
+    let mut modules_by_ws: Vec<Vec<usize>> = vec![vec![]; n];
+    for (i, m) in graph.modules.iter().enumerate() {
+        modules_by_ws[m.ws].push(i);
+    }
     let lists = |ws: usize, pkg: &str| workspaces[ws].manifest.has_dep(pkg);
     let closest = |ws: usize, pkg: &str| chains[ws].iter().copied().find(|&c| lists(c, pkg));
-    let installed = InstalledCache { root: root.to_path_buf(), map: Default::default() };
+    let installed = InstalledCache { root: root.to_path_buf(), map: Default::default(), by_query: Default::default() };
 
+    let t = std::time::Instant::now();
     // 1. Imports.
     for m in &graph.modules {
         let ws = m.ws;
@@ -263,11 +300,14 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
         }
     }
 
+    crate::perf("deps:imports", t);
+    let t = std::time::Instant::now();
     // 2. Config-file strings and package.json strings → listed deps.
     for ws in 0..n {
         let mut strings: FxHashSet<&str> = FxHashSet::default();
-        for m in &graph.modules {
-            if m.ws == ws && m.is_config {
+        for &mi in &modules_by_ws[ws] {
+            let m = &graph.modules[mi];
+            if m.is_config {
                 strings.extend(m.facts.strings.iter().map(|s| s.as_str()));
             }
         }
@@ -275,6 +315,44 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
         if strings.is_empty() {
             continue;
         }
+        // index: every string plus its package-like prefix (`a/b/c` → `a`, `@s/n/x` → `@s/n`)
+        let mut index: FxHashSet<String> = FxHashSet::default();
+        for s in &strings {
+            index.insert((*s).to_string());
+            if let Some(p) = crate::resolve::package_name(s) {
+                index.insert(p);
+            }
+        }
+        let refers = |dep: &str| -> bool {
+            if index.contains(dep) {
+                return true;
+            }
+            if dep.starts_with("@types/") {
+                return false;
+            }
+            for p in PLUGIN_PREFIXES {
+                if let Some(rest) = dep.strip_prefix(p) {
+                    if index.contains(rest) {
+                        return true;
+                    }
+                }
+            }
+            if let Some(scope) = dep.strip_prefix('@') {
+                if let Some((sc, name)) = scope.split_once('/') {
+                    for base in ["eslint-config", "prettier-config", "stylelint-config", "commitlint-config", "tsconfig", "babel-preset", "eslint-plugin"] {
+                        if name == base && index.contains(&format!("@{sc}")) {
+                            return true;
+                        }
+                        if let Some(rest) = name.strip_prefix(&format!("{base}-")) {
+                            if index.contains(&format!("@{sc}/{rest}")) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            false
+        };
         for &c in &chains[ws] {
             let deps: Vec<String> = workspaces[c].manifest.dep_names().map(str::to_string).collect();
             for dep in deps {
@@ -282,39 +360,39 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
                     continue;
                 }
                 let base = dep.strip_prefix("@types/").map(|b| b.replace("__", "/"));
-                if strings.iter().any(|s| string_refers_to(s, &dep) || base.as_deref().map(|b| string_refers_to(s, b) || (!b.contains('/') && s == &format!("@{b}"))).unwrap_or(false)) {
+                let hit = refers(&dep)
+                    || base.as_deref().map(|b| refers(b) || (!b.contains('/') && index.contains(&format!("@{b}")))).unwrap_or(false);
+                if hit {
                     referenced[c].insert(dep);
                 }
             }
         }
     }
 
+    crate::perf("deps:strings", t);
+    let t = std::time::Instant::now();
     // 3. Tool enablers whose config files are present, binaries from scripts, husky hooks and workflows.
     let mut foreign_binaries: Vec<(usize, Vec<String>, Vec<String>)> = Vec::new();
     let mut pending_binaries: Vec<(usize, String, bool)> = Vec::new();
     for ws in 0..n {
         let w = &workspaces[ws];
         let setup = &setups[ws];
-        for &ti in &setup.enabled_tools {
-            let tool = &crate::patterns::TOOLS[ti];
-            let has_config = graph.modules.iter().any(|m| m.ws == ws && m.is_config && setup.config.is_match(&m.rel[..]) );
-            let _ = has_config;
-            for e in tool.enablers {
+        for &ti in &setup.tools_with_config {
+            for e in crate::patterns::TOOLS[ti].enablers {
                 if e.ends_with('/') {
                     continue;
                 }
                 if let Some(c) = closest(ws, e) {
-                    if graph.modules.iter().any(|m| m.ws == ws && m.is_config && tool.config.iter().any(|cp| crate::patterns::build_glob(cp).map(|g| g.compile_matcher().is_match(ws_rel(root, &workspaces[ws].dir, &m.path))).unwrap_or(false))) {
-                        referenced[c].insert(e.to_string());
-                    }
+                    referenced[c].insert(e.to_string());
                 }
             }
         }
         let script_use = scripts::analyze(&w.manifest, &w.dir);
         let mut binaries = script_use.binaries;
         let mut packages = script_use.packages;
-        for m in &graph.modules {
-            if m.ws != ws || !m.is_config {
+        for &mi in &modules_by_ws[ws] {
+            let m = &graph.modules[mi];
+            if !m.is_config {
                 continue;
             }
             let rel = ws_rel(root, &w.dir, &m.path);
@@ -352,7 +430,7 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
             }
         }
         // Tool-implied dependencies (platform packages, test runners pulled in by addons...).
-        let strings: FxHashSet<String> = graph.modules.iter().filter(|m| m.ws == ws && m.is_config).flat_map(|m| m.facts.strings.iter().cloned()).collect();
+        let strings: FxHashSet<String> = modules_by_ws[ws].iter().map(|&mi| &graph.modules[mi]).filter(|m| m.is_config).flat_map(|m| m.facts.strings.iter().cloned()).collect();
         for &ti in &setup.enabled_tools {
             match crate::patterns::TOOLS[ti].name {
                 "capacitor" => {
@@ -441,6 +519,8 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
         }
     }
 
+    crate::perf("deps:scripts+bins", t);
+    let t = std::time::Instant::now();
     if let Some(name) = std::env::var_os("TIDY_DEBUG_DEPS") {
         let name = name.to_string_lossy().to_string();
         for ws in 0..n {
@@ -509,7 +589,7 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
                     continue;
                 }
             }
-            if ws_names.contains(name.as_str()) && graph.modules.iter().any(|m| m.ws == ws && m.edges.iter().any(|(_, r)| r.package.as_deref() == Some(name))) {
+            if ws_names.contains(name.as_str()) && modules_by_ws[ws].iter().any(|&mi| graph.modules[mi].edges.iter().any(|(_, r)| r.package.as_deref() == Some(name))) {
                 continue;
             }
             let (line, col) = line_col(&w.manifest.text, *pos);
@@ -524,6 +604,7 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
             issues.push(Issue { kind: IssueKind::Binaries, file: file.clone(), name: b.clone(), parent: None, line: 0, col: 0, pos: 0 });
         }
     }
+    crate::perf("deps:report", t);
     issues
 }
 

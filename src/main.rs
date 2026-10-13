@@ -1,4 +1,10 @@
 mod analysis;
+
+/// Fine-grained phase timings (name, ms) collected across modules when `--perf` is used.
+pub static PERF: std::sync::Mutex<Vec<(&'static str, f64)>> = std::sync::Mutex::new(Vec::new());
+pub fn perf(name: &'static str, start: std::time::Instant) {
+    PERF.lock().unwrap().push((name, start.elapsed().as_secs_f64() * 1000.0));
+}
 mod config;
 mod deps;
 mod extract;
@@ -93,7 +99,9 @@ fn main() -> Result<()> {
 
     let t_issues = Instant::now();
     let opts = analysis::Options { production: cli.production, tags: &cfg.tags, class_members: cli.include.iter().any(|s| s == "classMembers") };
+    let ta = Instant::now();
     let mut issues = analysis::analyze(&project, &graph, &project.setups, &opts);
+    perf("analysis", ta);
     issues.extend(deps::analyze(&project, &graph, &workspaces, &project.setups));
     let issues_ms = t_issues.elapsed().as_secs_f64() * 1000.0;
 
@@ -137,6 +145,9 @@ fn main() -> Result<()> {
             "  walk+classify {setup_ms:.1}ms  parse {:.1}ms  resolve {:.1}ms  graph {:.1}ms  issues {issues_ms:.1}ms  total {total:.1}ms",
             timings.parse_ms, timings.resolve_ms, timings.analyze_ms
         );
+        let phases = PERF.lock().unwrap();
+        let line: Vec<String> = phases.iter().map(|(n, ms)| format!("{n} {ms:.1}ms")).collect();
+        eprintln!("  detail: {}", line.join("  "));
     }
     if !issues.is_empty() && !cli.no_exit_code {
         std::process::exit(1);

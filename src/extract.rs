@@ -7,7 +7,7 @@ use oxc_ast::AstKind;
 use oxc_parser::{ParseOptions, Parser};
 use oxc_semantic::{Semantic, SemanticBuilder, SymbolId};
 use oxc_span::{GetSpan, SourceType, Span};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -234,9 +234,68 @@ pub fn is_component_file(path: &Path) -> bool {
 /// Cheap extraction for files outside the project (generated code, gitignored files reached via
 /// imports): imports/exports from the module record only, no semantic analysis. Member usage is
 /// unknown, so imported bindings count as fully used.
+/// Import specifiers of very large generated files (multi-megabyte `.d.ts`), found by scanning for
+/// `import`/`export ... from` statements and `import()`/`require()` calls instead of parsing.
+pub fn extract_scan(source: &str) -> FileFacts {
+    let mut facts = FileFacts { has_module_syntax: true, ..Default::default() };
+    let mut seen: FxHashSet<String> = FxHashSet::default();
+    let bytes = source.as_bytes();
+    let mut push = |spec: &str, kind: ImportKind, start: usize, facts: &mut FileFacts| {
+        if seen.insert(spec.to_string()) {
+            facts.imports.push(Import { specifier: spec.to_string(), kind, is_type: false, names: Names::All, start: start as u32, line: 0, col: 0 });
+        }
+    };
+    // quoted string right after position `i` (skipping spaces)
+    let quoted = |mut i: usize| -> Option<(usize, usize)> {
+        while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+            i += 1;
+        }
+        let q = *bytes.get(i)?;
+        if q != b'"' && q != b'\'' {
+            return None;
+        }
+        let end = memchr::memchr(q, &bytes[i + 1..])? + i + 1;
+        Some((i + 1, end))
+    };
+    // ` from "..."` after import/export statements
+    let finder = memchr::memmem::Finder::new(b" from ");
+    for pos in finder.find_iter(bytes) {
+        // statement must start with import/export on this line
+        let line_start = memchr::memrchr(b'\n', &bytes[..pos]).map(|i| i + 1).unwrap_or(0);
+        let head = &source[line_start..pos];
+        let head = head.trim_start();
+        if !(head.starts_with("import") || head.starts_with("export")) {
+            continue;
+        }
+        if let Some((a, b)) = quoted(pos + 6) {
+            push(&source[a..b], ImportKind::Static, line_start, &mut facts);
+        }
+    }
+    for needle in [&b"require("[..], &b"import("[..]] {
+        let f = memchr::memmem::Finder::new(needle);
+        for pos in f.find_iter(bytes) {
+            if let Some((a, b)) = quoted(pos + needle.len()) {
+                push(&source[a..b], ImportKind::Require, pos, &mut facts);
+            }
+        }
+    }
+    // side-effect imports: `import "x"`
+    let f = memchr::memmem::Finder::new(b"import ");
+    for pos in f.find_iter(bytes) {
+        if let Some((a, b)) = quoted(pos + 7) {
+            push(&source[a..b], ImportKind::Static, pos, &mut facts);
+        }
+    }
+    facts
+}
+
 pub fn extract_light(path: &Path, source: &str) -> FileFacts {
     if is_component_file(path) {
         return extract(path, source, false);
+    }
+    // Generated giants (Prisma clients, GraphQL schemas...) only matter for the packages they import.
+    if source.len() > 128 * 1024 {
+        return extract_scan(source);
     }
     let Some(source_type) = source_type_for(path) else { return FileFacts::default() };
     let allocator = Allocator::default();
