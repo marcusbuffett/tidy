@@ -1,0 +1,22 @@
+<svg xmlns='http://www.w3.org/2000/svg' width='760' height='300' viewBox='0 0 760 300'>
+<rect width='760' height='300' fill='white'/>
+<text x='230' y='22' font-size='14' fill='#555' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>wall-clock seconds, cold, median of 5 runs (lower is better)</text>
+<text x='216' y='62' text-anchor='end' font-size='15' font-weight='600' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>micro</text>
+<text x='216' y='82' text-anchor='end' font-size='12' fill='#777' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>24 workspaces, 8.1k files</text>
+<rect x='230' y='48' width='420.0' height='20' rx='3' fill='#c9ccd1'/>
+<text x='658.0' y='63' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>knip 13.48s</text>
+<rect x='230' y='74' width='9.3' height='20' rx='3' fill='#2f81f7'/>
+<text x='247.3' y='89' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>tidy 0.30s  (45x)</text>
+<text x='216' y='142' text-anchor='end' font-size='15' font-weight='600' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>TanStack/query</text>
+<text x='216' y='162' text-anchor='end' font-size='12' fill='#777' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>102 workspaces, 1.4k files</text>
+<rect x='230' y='128' width='75.7' height='20' rx='3' fill='#c9ccd1'/>
+<text x='313.7' y='143' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>knip 2.43s</text>
+<rect x='230' y='154' width='6.2' height='20' rx='3' fill='#2f81f7'/>
+<text x='244.2' y='169' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>tidy 0.20s  (12x)</text>
+<text x='216' y='222' text-anchor='end' font-size='15' font-weight='600' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>chessbook</text>
+<text x='216' y='242' text-anchor='end' font-size='12' fill='#777' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>488 files</text>
+<rect x='230' y='208' width='66.1' height='20' rx='3' fill='#c9ccd1'/>
+<text x='304.1' y='223' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>knip 2.12s</text>
+<rect x='230' y='234' width='3.0' height='20' rx='3' fill='#2f81f7'/>
+<text x='241.0' y='249' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>tidy 0.06s  (35x)</text>
+</svg>

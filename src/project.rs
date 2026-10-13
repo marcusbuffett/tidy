@@ -35,6 +35,7 @@ pub struct WorkspaceSetup {
     pub tool_entry: PatternSet,
     pub dev_entry: PatternSet,
     pub ignore: PatternSet,
+    pub ignore_files: PatternSet,
     pub config: PatternSet,
     pub exact_entries: FxHashSet<String>,
     pub enabled_tools: Vec<usize>,
@@ -165,6 +166,37 @@ fn tool_enabled(tool: &Tool, ws_idx: usize, workspaces: &[Workspace]) -> bool {
     false
 }
 
+/// Glob patterns for a wildcard package export target (`./lib/*.js`, `./dist/runtime/*`): `*` spans
+/// directories like in Node's subpath patterns, and build outputs are mapped back to `src/`.
+fn wildcard_entry_patterns(target: &str) -> Vec<String> {
+    let t = target.trim_start_matches("./");
+    if t.starts_with('/') || t.starts_with("..") || t.trim_matches('*').is_empty() {
+        return vec![];
+    }
+    let glob: String = t.split('/').map(|seg| if seg == "*" { "**".to_string() } else { seg.replace('*', "**/*") }).collect::<Vec<_>>().join("/");
+    let with_ext = |g: &str| -> String {
+        if let Some(stem) = g.strip_suffix(".js") {
+            format!("{stem}.{{js,jsx,ts,tsx,mjs,cjs,mts,cts}}")
+        } else if let Some(stem) = g.strip_suffix(".mjs") {
+            format!("{stem}.{{mjs,mts}}")
+        } else if let Some(stem) = g.strip_suffix(".cjs") {
+            format!("{stem}.{{cjs,cts}}")
+        } else if g.rsplit('/').next().map(|f| f.contains('.')).unwrap_or(false) {
+            g.to_string()
+        } else {
+            format!("{g}/*.{{js,jsx,ts,tsx,mjs,cjs,mts,cts}}")
+        }
+    };
+    // the literal pattern keeps its extension; only build-output mappings widen it to source extensions
+    let mut out = vec![if glob.rsplit('/').next().map(|f| f.contains('.')).unwrap_or(false) { glob.clone() } else { with_ext(&glob) }];
+    for (dist, src) in [("dist/", "src/"), ("build/", "src/"), ("out/", "src/"), ("lib/", "src/"), ("esm/", "src/"), ("cjs/", "src/")] {
+        if let Some(rest) = glob.strip_prefix(dist) {
+            out.push(with_ext(&format!("{src}{rest}")));
+        }
+    }
+    out
+}
+
 /// Map a package.json entry ref (`dist/index.js`) to an existing source file if possible.
 fn map_entry_ref(ws_dir: &Path, r: &str) -> Option<String> {
     let r = r.trim_start_matches("./");
@@ -258,6 +290,7 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
 
     // Root-level ignore applies to all workspaces (root-relative).
     let root_ignore = PatternSet::new(&cfg.root.ignore.as_ref().map(|s| s.to_vec()).unwrap_or_default())?;
+    let root_ignore_files = PatternSet::new(&cfg.root.ignore_files.as_ref().map(|s| s.to_vec()).unwrap_or_default())?;
     let negated_ws = PatternSet::new(&crate::workspace::negated_globs(root))?;
     let ignore_ws_set = patterns::build_set(&cfg.ignore_workspaces)?;
 
@@ -404,6 +437,9 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
         for r in &ws.manifest.entry_refs {
             if let Some(m) = map_entry_ref(&ws.dir, r) {
                 exact_entries.insert(m);
+            } else if r.contains('*') {
+                // `"./lib/*": "./lib/*.js"`: every matching file is a public entry point
+                tool_entry.extend(wildcard_entry_patterns(r));
             }
         }
         let script_use = scripts::analyze(&ws.manifest, &ws.dir);
@@ -465,6 +501,7 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
             tool_entry: PatternSet::new(&tool_entry)?,
             dev_entry: PatternSet::new(&dev_entry)?,
             ignore: PatternSet::new(&ignore)?,
+            ignore_files: PatternSet::new(&wcfg.and_then(|c| c.ignore_files.as_ref()).map(|s| s.to_vec()).unwrap_or_default())?,
             config: PatternSet::new(&config)?,
             exact_entries,
             tools_with_config: enabled_tools.iter().copied().filter(|t| config_present[wi].contains(t)).collect(),
@@ -490,6 +527,9 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
         }
         let ws_rel = ws_rels[i].clone();
         let s = &setups[ws];
+        if root_ignore_files.is_match(&rel) || s.ignore_files.is_match(&ws_rel) {
+            continue;
+        }
         let is_ignored = root_ignore.is_match(&rel) || s.ignore.is_match(&ws_rel) || s.is_ignored_workspace;
         let is_config = s.config.is_match(&ws_rel);
         let is_dts = ws_rel.ends_with(".d.ts") || ws_rel.ends_with(".d.mts") || ws_rel.ends_with(".d.cts");

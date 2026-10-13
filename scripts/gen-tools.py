@@ -128,11 +128,8 @@ def main():
         get = lambda k: [x for x in a.get(k, []) if x != 'package.json']
         fields = {'enablers': [enabler(e) for e in a.get('enablers', [])], 'config': get('config'), 'entry': get('entry'), 'production': get('production')}
         for k, v in OVERRIDES.get(n, {}).items(): fields[k] = v
-        fb = fallback.get(n, {})
-        if not (fields['entry'] or fields['production']):
-            fields['entry'], fields['production'] = fb.get('entry', []), fb.get('production', [])
-        if not fields['config'] and fb.get('config'):
-            fields['config'] = fb['config']
+        for k, v in fallback.get(n, {}).items():
+            fields[k] = list(dict.fromkeys(fields[k] + v))
         for k in list(fields):
             if k in rec['bad'] and k not in OVERRIDES.get(n, {}):
                 print(f'warning: {n}.{k} has runtime-computed items; emitting the static part', file=sys.stderr)

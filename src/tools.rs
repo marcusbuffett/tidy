@@ -865,7 +865,13 @@ pub static TOOLS: &[Tool] = &[
         entry: E,
         production: &["{pages,renderer}/**/+*.{js,jsx,ts,tsx,vue,react,solid}"],
     },
-    Tool { name: "vite", enablers: &["vite", "vitest", "vite-plus"], config: &["vite.config.{js,mjs,ts,cjs,mts,cts}"], entry: E, production: &["index.html"] },
+    Tool {
+        name: "vite",
+        enablers: &["vite", "vitest", "vite-plus"],
+        config: &["vite.config.{js,mjs,ts,cjs,mts,cts}"],
+        entry: E,
+        production: &["index.html", "src/vite-env.d.ts"],
+    },
     Tool { name: "vite-plugin-pages", enablers: &["vite-plugin-pages"], config: &["vite.config.{js,mjs,ts,cjs,mts,cts}"], entry: E, production: &["/**/"] },
     Tool {
         name: "vite-plugin-pwa",
@@ -900,7 +906,7 @@ pub static TOOLS: &[Tool] = &[
         name: "vitest",
         enablers: &["vitest", "vite-plus"],
         config: &["vitest.config.{js,mjs,ts,cjs,mts,cts}", "vitest.{workspace,projects}.{js,mjs,ts,cjs,mts,cts,json}"],
-        entry: &["**/*.{bench,test,test-d,spec,spec-d}.?(c|m)[jt]s?(x)", "**/__mocks__/**/*.?(c|m)[jt]s?(x)"],
+        entry: &["**/*.{bench,test,test-d,spec,spec-d}.?(c|m)[jt]s?(x)", "**/__mocks__/**/*.?(c|m)[jt]s?(x)", "src/vite-env.d.ts"],
         production: E,
     },
     Tool { name: "vue", enablers: &["vue"], config: &["vue.config.{js,ts,mjs}"], entry: E, production: E },

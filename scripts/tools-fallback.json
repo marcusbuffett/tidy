@@ -122,7 +122,8 @@
  "vite": {
   "entry": [],
   "production": [
-   "index.html"
+   "index.html",
+   "src/vite-env.d.ts"
   ]
  },
  "tailwind": {
@@ -222,6 +223,11 @@
   "entry": [],
   "production": [
    "**/*.mjs"
+  ]
+ },
+ "vitest": {
+  "entry": [
+   "src/vite-env.d.ts"
   ]
  }
 }

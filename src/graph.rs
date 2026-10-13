@@ -273,7 +273,8 @@ fn add_config_refs(facts: &mut FileFacts) {
         }
         if s.contains('*') {
             // build/test entry globs only under entry-like keys (`entry: ['src/*.ts']`, rollup `input`, storybook `stories`)
-            const ENTRY_KEYS: &[&str] = &["entry", "entries", "input", "stories", "testMatch", "setupFiles", "globalSetup"];
+            const ENTRY_KEYS: &[&str] =
+                &["entry", "entries", "input", "entryPoints", "stories", "testMatch", "setupFiles", "globalSetup", "import", "require", "schema", "paths"];
             let keyed = facts.keyed_strings.iter().any(|(k, v)| v == &s && ENTRY_KEYS.contains(&k.as_str()));
             if !keyed || s.starts_with('!') {
                 continue;

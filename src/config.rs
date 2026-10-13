@@ -15,6 +15,9 @@ pub struct RawWorkspaceConfig {
     pub project: Option<StringOrVec>,
     #[serde(default)]
     pub ignore: Option<StringOrVec>,
+    /// Files excluded from the analysis entirely (as if they did not exist).
+    #[serde(default)]
+    pub ignore_files: Option<StringOrVec>,
     #[serde(default)]
     pub ignore_dependencies: Vec<String>,
     #[serde(default)]
