@@ -4,6 +4,7 @@ mod deps;
 mod extract;
 mod graph;
 mod issues;
+mod jsvalue;
 mod patterns;
 mod project;
 mod report;
@@ -73,7 +74,15 @@ fn main() -> Result<()> {
     let project = project::build(&root, &cfg, &workspaces, cli.production)?;
     let setup_ms = t_setup.elapsed().as_secs_f64() * 1000.0;
 
-    let resolvers = resolve::Resolvers::new(&root);
+    let mut resolvers = resolve::Resolvers::new(&root);
+    for w in &workspaces {
+        if let Some(name) = w.pkg_name() {
+            resolvers.workspace_packages.insert(
+                name.to_string(),
+                resolve::WorkspacePackage { dir: w.dir.clone(), exports: w.manifest.raw.get("exports").cloned(), entry_refs: w.manifest.entry_refs.clone() },
+            );
+        }
+    }
     let ws_dirs: Vec<PathBuf> = workspaces.iter().map(|w| w.dir.clone()).collect();
     let (graph, timings) = graph::build(&project, &resolvers, &ws_dirs);
 

@@ -127,6 +127,8 @@ pub struct Export {
     pub tags: Vec<String>,
     /// Indices of other exports whose declarations reference this export's local binding.
     pub referenced_in: Vec<usize>,
+    /// Declared through a destructuring pattern (`export const [a, setA] = ...`): in-file use counts.
+    pub is_binding_element: bool,
     /// Local binding symbol (for referenced_in computation).
     symbol: Option<SymbolId>,
 }
@@ -146,6 +148,8 @@ pub struct FileFacts {
     pub is_cjs: bool,
     /// String literals (only collected for config files).
     pub strings: Vec<String>,
+    /// String literals with the nearest enclosing object key (`entry: ['src/*.ts']` → ("entry", "src/*.ts")).
+    pub keyed_strings: Vec<(String, String)>,
     pub parse_error: bool,
 }
 
@@ -171,10 +175,69 @@ pub fn source_type_for(path: &Path) -> Option<SourceType> {
     }
 }
 
+/// Single-file components (`.svelte`, `.vue`, `.astro`): extract `<script>` blocks (and astro frontmatter)
+/// so their imports/exports can be parsed as TypeScript. Returns the concatenated script source.
+pub fn component_script(path: &Path, source: &str) -> Option<String> {
+    let ext = path.extension()?.to_str()?;
+    let mut out = String::new();
+    match ext {
+        "astro" => {
+            // frontmatter between leading `---` fences
+            let t = source.trim_start();
+            if let Some(rest) = t.strip_prefix("---") {
+                if let Some(end) = rest.find("\n---") {
+                    out.push_str(&rest[..end]);
+                }
+            }
+        }
+        "svelte" | "vue" | "html" | "mdx" => {}
+        _ => return None,
+    }
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    while let Some(start) = source[i..].find("<script") {
+        let open = i + start;
+        let Some(tag_end) = source[open..].find('>') else { break };
+        let tag = &source[open..open + tag_end];
+        let body_start = open + tag_end + 1;
+        let Some(close) = source[body_start..].find("</script") else { break };
+        if !tag.contains("src=") {
+            out.push_str(&source[body_start..body_start + close]);
+            out.push('\n');
+        } else if let Some(src) = tag.split("src=").nth(1) {
+            let q = src.chars().next().unwrap_or('"');
+            let v: String = src.trim_start_matches(q).chars().take_while(|c| *c != q).collect();
+            out.push_str(&format!("import \"{v}\";\n"));
+        }
+        i = body_start + close;
+        if i >= bytes.len() {
+            break;
+        }
+    }
+    if ext == "mdx" {
+        // top-level `import`/`export` lines in MDX
+        for line in source.lines() {
+            let l = line.trim_start();
+            if (l.starts_with("import ") || l.starts_with("export ")) && !out.contains(l) {
+                out.push_str(l);
+                out.push('\n');
+            }
+        }
+    }
+    Some(out)
+}
+
+pub fn is_component_file(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).map(|e| matches!(e, "svelte" | "vue" | "astro" | "mdx")).unwrap_or(false)
+}
+
 /// Cheap extraction for files outside the project (generated code, gitignored files reached via
 /// imports): imports/exports from the module record only, no semantic analysis. Member usage is
 /// unknown, so imported bindings count as fully used.
 pub fn extract_light(path: &Path, source: &str) -> FileFacts {
+    if is_component_file(path) {
+        return extract(path, source, false);
+    }
     let Some(source_type) = source_type_for(path) else { return FileFacts::default() };
     let allocator = Allocator::default();
     let ret = Parser::new(&allocator, source, source_type)
@@ -214,7 +277,7 @@ pub fn extract_light(path: &Path, source: &str) -> FileFacts {
         let name = export_name_of(&entry.export_name);
         let start = entry.span.start;
         let (line, col) = lines.line_col(start);
-        facts.exports.push(Export { name, kind: ExportKind::Unknown, members: vec![], start, line, col, used_in_file: false, members_used_in_file: Members::All, reexport: None, tags: vec![], referenced_in: vec![], symbol: None });
+        facts.exports.push(Export { name, kind: ExportKind::Unknown, members: vec![], start, line, col, used_in_file: false, members_used_in_file: Members::All, reexport: None, tags: vec![], referenced_in: vec![], is_binding_element: false, symbol: None });
     }
     for entry in mr.indirect_export_entries.iter() {
         let Some(req) = &entry.module_request else { continue };
@@ -232,7 +295,7 @@ pub fn extract_light(path: &Path, source: &str) -> FileFacts {
         }
         let name = export_name_of(&entry.export_name);
         let (line, col) = lines.line_col(entry.span.start);
-        facts.exports.push(Export { name, kind: ExportKind::Unknown, members: vec![], start: entry.span.start, line, col, used_in_file: false, members_used_in_file: Members::All, reexport: Some((idx, imported)), tags: vec![], referenced_in: vec![], symbol: None });
+        facts.exports.push(Export { name, kind: ExportKind::Unknown, members: vec![], start: entry.span.start, line, col, used_in_file: false, members_used_in_file: Members::All, reexport: Some((idx, imported)), tags: vec![], referenced_in: vec![], is_binding_element: false, symbol: None });
     }
     for entry in mr.star_export_entries.iter() {
         let Some(req) = &entry.module_request else { continue };
@@ -244,7 +307,20 @@ pub fn extract_light(path: &Path, source: &str) -> FileFacts {
 }
 
 pub fn extract(path: &Path, source: &str, collect_strings: bool) -> FileFacts {
+    if is_component_file(path) {
+        let Some(script) = component_script(path, source) else { return FileFacts::default() };
+        let mut facts = extract_source(&script, SourceType::tsx(), collect_strings);
+        // component files are consumed by their framework: never report their exports
+        for e in &mut facts.exports {
+            e.tags.push("public".into());
+        }
+        return facts;
+    }
     let Some(source_type) = source_type_for(path) else { return FileFacts::default() };
+    extract_source(source, source_type, collect_strings)
+}
+
+fn extract_source(source: &str, source_type: SourceType, collect_strings: bool) -> FileFacts {
     let allocator = Allocator::default();
     let ret = Parser::new(&allocator, source, source_type)
         .with_options(ParseOptions { preserve_parens: false, ..ParseOptions::default() })
@@ -451,6 +527,24 @@ impl<'s, 'a> Extractor<'s, 'a> {
                 AstKind::AssignmentExpression(assign) => self.assignment(assign),
                 AstKind::StringLiteral(s) if self.collect_strings => {
                     self.facts.strings.push(s.value.to_string());
+                    if s.value.contains('*') {
+                        // nearest enclosing object property key
+                        let mut pid = nodes.parent_id(node.id());
+                        let mut key: Option<String> = None;
+                        for _ in 0..6 {
+                            match nodes.kind(pid) {
+                                AstKind::ObjectProperty(p) => {
+                                    key = property_key_name(&p.key);
+                                    break;
+                                }
+                                AstKind::ArrayExpression(_) | AstKind::ParenthesizedExpression(_) | AstKind::TSAsExpression(_) => pid = nodes.parent_id(pid),
+                                _ => break,
+                            }
+                        }
+                        if let Some(k) = key {
+                            self.facts.keyed_strings.push((k, s.value.to_string()));
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -533,7 +627,7 @@ impl<'s, 'a> Extractor<'s, 'a> {
         tags: Vec<String>,
     ) {
         let (line, col) = self.lines.line_col(start);
-        self.facts.exports.push(Export { name, kind, members, start, line, col, used_in_file, members_used_in_file, reexport, tags, referenced_in: vec![], symbol: None });
+        self.facts.exports.push(Export { name, kind, members, start, line, col, used_in_file, members_used_in_file, reexport, tags, referenced_in: vec![], is_binding_element: false, symbol: None });
     }
 
     /// Attach the local symbol to the most recently pushed export.
@@ -567,6 +661,15 @@ impl<'s, 'a> Extractor<'s, 'a> {
             let Some(sym) = self.facts.exports[i].symbol else { continue };
             let mut refs: Vec<usize> = Vec::new();
             for r in self.sem.symbol_references(sym) {
+                // only references in type positions: `Foo`, `typeof foo`, `Foo.Bar` as a type
+                let mut pid = nodes.parent_id(r.node_id());
+                while matches!(nodes.kind(pid), AstKind::TSQualifiedName(_)) {
+                    pid = nodes.parent_id(pid);
+                }
+                let is_type_query = matches!(nodes.kind(pid), AstKind::TSTypeQuery(_));
+                if !is_type_query && !matches!(nodes.kind(pid), AstKind::TSTypeReference(_)) {
+                    continue;
+                }
                 let mut id = r.node_id();
                 loop {
                     let pid = nodes.parent_id(id);
@@ -577,7 +680,9 @@ impl<'s, 'a> Extractor<'s, 'a> {
                 }
                 if let Some(list) = by_stmt.get(&nodes.kind(id).span().start) {
                     for &j in list {
-                        if j != i && !refs.contains(&j) {
+                        // knip: a plain type reference only counts inside a *type* export; `typeof x` counts anywhere
+                        let container_is_type = matches!(self.facts.exports[j].kind, ExportKind::Type | ExportKind::Enum | ExportKind::Namespace);
+                        if j != i && !refs.contains(&j) && (is_type_query || container_is_type) {
                             refs.push(j);
                         }
                     }
@@ -768,11 +873,15 @@ impl<'s, 'a> Extractor<'s, 'a> {
                 for decl in &v.declarations {
                     let mut names = Vec::new();
                     binding_names(&decl.id, &mut names);
+                    let is_pattern = !matches!(decl.id, BindingPattern::BindingIdentifier(_));
                     for (name, start, sym) in names {
                         let used = self.used_in_file(sym);
                         let (_, mu) = self.member_usage(sym);
                         self.push_export(name, ExportKind::Value, vec![], start, used, mu, None, tags.to_vec());
                         self.set_symbol(sym);
+                        if let Some(e) = self.facts.exports.last_mut() {
+                            e.is_binding_element = is_pattern;
+                        }
                     }
                 }
             }
@@ -883,6 +992,85 @@ impl<'s, 'a> Extractor<'s, 'a> {
                 _ => break,
             }
         }
+        // `const [a, { b }] = await Promise.all([import('x'), import('y')])`
+        if let AstKind::ArrayExpression(arr) = nodes.kind(pid) {
+            let my_span = nodes.kind(id).span();
+            let index = arr.elements.iter().position(|el| el.as_expression().map(|e| e.span() == my_span).unwrap_or(false));
+            let call_id = nodes.parent_id(pid);
+            if let (Some(index), AstKind::CallExpression(call)) = (index, nodes.kind(call_id)) {
+                let is_promise_all = matches!(&call.callee, Expression::StaticMemberExpression(m) if m.property.name == "all" || m.property.name == "allSettled");
+                if is_promise_all {
+                    let mut p2 = nodes.parent_id(call_id);
+                    while matches!(nodes.kind(p2), AstKind::AwaitExpression(_) | AstKind::ParenthesizedExpression(_) | AstKind::TSAsExpression(_)) {
+                        p2 = nodes.parent_id(p2);
+                    }
+                    if let AstKind::VariableDeclarator(v) = nodes.kind(p2) {
+                        if let BindingPattern::ArrayPattern(ap) = &v.id {
+                            return match ap.elements.get(index) {
+                                Some(Some(BindingPattern::BindingIdentifier(b))) => {
+                                    let (_, members) = self.member_usage(b.symbol_id.get());
+                                    Names::Named(vec![ImportedName { name: "*".into(), is_type: false, members }])
+                                }
+                                Some(Some(BindingPattern::ObjectPattern(o))) => {
+                                    if o.rest.is_some() {
+                                        return Names::All;
+                                    }
+                                    let mut names = Vec::new();
+                                    for p in &o.properties {
+                                        match property_key_name(&p.key) {
+                                            Some(k) => names.push(ImportedName { name: k, is_type: false, members: Members::All }),
+                                            None => return Names::All,
+                                        }
+                                    }
+                                    Names::Named(names)
+                                }
+                                Some(None) => Names::Named(vec![]),
+                                _ => Names::All,
+                            };
+                        }
+                    }
+                }
+            }
+        }
+        // `import('./x').then(m => m.a)` / `.then(({ a }) => ...)`
+        if let AstKind::StaticMemberExpression(m) = nodes.kind(pid) {
+            if m.property.name == "then" {
+                if let AstKind::CallExpression(call) = nodes.kind(nodes.parent_id(pid)) {
+                    if let Some(arg) = call.arguments.first().and_then(|a| a.as_expression()) {
+                        let params = match arg {
+                            Expression::ArrowFunctionExpression(f) => Some(&f.params),
+                            Expression::FunctionExpression(f) => Some(&f.params),
+                            _ => None,
+                        };
+                        if let Some(params) = params {
+                            if let Some(first) = params.items.first() {
+                                match &first.pattern {
+                                    BindingPattern::BindingIdentifier(b) => {
+                                        let (_, members) = self.member_usage(b.symbol_id.get());
+                                        return Names::Named(vec![ImportedName { name: "*".into(), is_type: false, members }]);
+                                    }
+                                    BindingPattern::ObjectPattern(o) => {
+                                        if o.rest.is_none() {
+                                            let mut names = Vec::new();
+                                            for p in &o.properties {
+                                                match property_key_name(&p.key) {
+                                                    Some(k) => names.push(ImportedName { name: k, is_type: false, members: Members::All }),
+                                                    None => return Names::All,
+                                                }
+                                            }
+                                            return Names::Named(names);
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            } else {
+                                return Names::Named(vec![]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         match nodes.kind(pid) {
             AstKind::VariableDeclarator(v) => match &v.id {
                 BindingPattern::BindingIdentifier(b) => {
@@ -919,7 +1107,7 @@ impl<'s, 'a> Extractor<'s, 'a> {
     fn call_expression(&mut self, id: oxc_semantic::NodeId, call: &CallExpression<'a>) {
         let sem = self.sem;
         match &call.callee {
-            Expression::Identifier(_) if is_global_ident(sem, &call.callee, "require") => {
+            Expression::Identifier(callee) if callee.name == "require" => {
                 if let Some(spec) = first_string_arg(&call.arguments) {
                     let names = self.names_from_parent(id);
                     self.push_import(spec, ImportKind::Require, false, names, call.span.start);
@@ -928,7 +1116,7 @@ impl<'s, 'a> Extractor<'s, 'a> {
             }
             Expression::StaticMemberExpression(m) => {
                 let prop = m.property.name.as_str();
-                if is_global_ident(sem, &m.object, "require") {
+                if matches!(&m.object, Expression::Identifier(obj) if obj.name == "require") {
                     if prop == "resolve" {
                         if let Some(spec) = first_string_arg(&call.arguments) {
                             self.push_import(spec, ImportKind::Require, false, Names::Named(vec![]), call.span.start);

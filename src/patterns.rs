@@ -119,13 +119,21 @@ pub fn build_glob(p: &str) -> Result<Glob> {
 }
 
 pub fn build_set(patterns: &[String]) -> Result<GlobSet> {
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<Vec<String>, GlobSet>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    if let Some(set) = cache.lock().unwrap().get(patterns) {
+        return Ok(set.clone());
+    }
     let mut b = GlobSetBuilder::new();
     for p in patterns {
         for e in expand_braces(&normalize_glob(p)) {
             b.add(GlobBuilder::new(&e).literal_separator(true).build()?);
         }
     }
-    Ok(b.build()?)
+    let set = b.build()?;
+    cache.lock().unwrap().insert(patterns.to_vec(), set.clone());
+    Ok(set)
 }
 
 /// A pattern list with positive and negated (`!`) entries.
@@ -224,6 +232,7 @@ pub const TOOLS: &[Tool] = &[
     Tool { name: "unbuild", enablers: &["unbuild"], config: &["build.config.{js,cjs,mjs,ts,mts,cts,json}"], entry: E, dev: false },
     Tool { name: "parcel", enablers: &["parcel"], config: &[".parcelrc"], entry: E, dev: false },
     Tool { name: "eslint", enablers: &["eslint"], config: &["eslint.config.{js,cjs,mjs,ts,cts,mts}", ".eslintrc", ".eslintrc.{js,json,cjs,yml,yaml}"], entry: E, dev: true },
+    Tool { name: "oxfmt", enablers: &["oxfmt"], config: &[".oxfmtrc.json", ".oxfmtrc.jsonc", "oxfmt.config.{js,ts,mjs,mts}"], entry: E, dev: true },
     Tool { name: "oxlint", enablers: &["oxlint"], config: &[".oxlintrc.json", "oxlint.config.{js,ts,mjs,mts}"], entry: E, dev: true },
     Tool { name: "biome", enablers: &["@biomejs/biome"], config: &["biome.json", "biome.jsonc"], entry: E, dev: true },
     Tool { name: "prettier", enablers: &["prettier"], config: &[".prettierrc", ".prettierrc.{json,js,cjs,mjs,ts,yml,yaml,toml,json5}", "prettier.config.{js,cjs,mjs,ts,mts,cts}"], entry: E, dev: true },

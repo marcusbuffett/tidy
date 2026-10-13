@@ -67,7 +67,11 @@ pub fn analyze(project: &Project, graph: &Graph, setups: &[WorkspaceSetup], opts
             continue;
         }
         for (i, e) in m.facts.exports.iter().enumerate() {
-            if e.tags.iter().any(|t| t == "public" || t == "alias") {
+            if e.tags.iter().any(|t| t == "public" || t == "alias" || t == "beta") {
+                continue;
+            }
+            // TS namespaces are containers; knip does not report them either.
+            if e.kind == ExportKind::Namespace {
                 continue;
             }
             if !tag_exclude.is_empty() && e.tags.iter().any(|t| tag_exclude.contains(&t.as_str())) {
@@ -90,10 +94,10 @@ pub fn analyze(project: &Project, graph: &Graph, setups: &[WorkspaceSetup], opts
                         continue;
                     }
                     let ieuf = &setup.ignore_exports_used_in_file;
-                    if e.used_in_file && (ieuf.applies(if e.kind == ExportKind::Type { "types" } else { "exports" }) || ieuf.applies(kind_key)) {
+                    if e.used_in_file && (e.is_binding_element || ieuf.applies(if e.kind == ExportKind::Type { "types" } else { "exports" }) || ieuf.applies(kind_key)) {
                         continue;
                     }
-                    let kind = if e.kind == ExportKind::Type { IssueKind::Types } else { IssueKind::Exports };
+                    let kind = if matches!(e.kind, ExportKind::Type | ExportKind::Enum) { IssueKind::Types } else { IssueKind::Exports };
                     issues.push(Issue { kind, file: m.rel.clone(), name: e.name.clone(), parent: None, line: e.line, col: e.col, pos: e.start });
                 }
                 Some(members) => {
@@ -119,21 +123,8 @@ pub fn analyze(project: &Project, graph: &Graph, setups: &[WorkspaceSetup], opts
     issues
 }
 
-/// knip semantics: an export referenced by the declaration of another export that is used
-/// externally is considered used.
+/// knip semantics: an export referenced (in a type position) by the declaration of another export
+/// that is used externally is part of the public type surface and not reported.
 fn referenced_in_used_export(m: &crate::graph::Module, i: usize) -> bool {
-    let mut stack: Vec<usize> = m.facts.exports[i].referenced_in.clone();
-    let mut seen = vec![false; m.facts.exports.len()];
-    seen[i] = true;
-    while let Some(j) = stack.pop() {
-        if seen[j] {
-            continue;
-        }
-        seen[j] = true;
-        if m.export_used[j].is_some() {
-            return true;
-        }
-        stack.extend(m.facts.exports[j].referenced_in.iter().copied());
-    }
-    false
+    m.facts.exports[i].referenced_in.iter().any(|&j| m.export_used[j].is_some())
 }

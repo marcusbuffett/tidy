@@ -55,6 +55,7 @@ const KNOWN_BINARIES: &[(&str, &str)] = &[
 struct Installed {
     peers: Vec<String>,
     has_types: bool,
+    bins: Vec<String>,
 }
 
 struct InstalledCache {
@@ -75,7 +76,12 @@ impl InstalledCache {
                 let json: serde_json::Value = serde_json::from_str(&text).ok()?;
                 let peers = json.get("peerDependencies").and_then(|p| p.as_object()).map(|o| o.keys().cloned().collect()).unwrap_or_default();
                 let has_types = json.get("types").is_some() || json.get("typings").is_some();
-                let v = std::sync::Arc::new(Installed { peers, has_types });
+                let bins = match json.get("bin") {
+                    Some(serde_json::Value::String(_)) => vec![name.rsplit('/').next().unwrap_or(name).to_string()],
+                    Some(serde_json::Value::Object(o)) => o.keys().cloned().collect(),
+                    _ => vec![],
+                };
+                let v = std::sync::Arc::new(Installed { peers, has_types, bins });
                 self.map.lock().unwrap().insert(pj, v.clone());
                 return Some(v);
             }
@@ -235,7 +241,7 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
                     referenced[c].insert(pkg.clone());
                 }
                 None => {
-                    if m.is_ignored {
+                    if m.is_ignored || !m.reachable {
                         continue;
                     }
                     if workspaces[ws].pkg_name() == Some(pkg.as_str()) || ws_names.contains(pkg.as_str()) {
@@ -345,6 +351,30 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
                 }
             }
         }
+        // Tool-implied dependencies (platform packages, test runners pulled in by addons...).
+        let strings: FxHashSet<String> = graph.modules.iter().filter(|m| m.ws == ws && m.is_config).flat_map(|m| m.facts.strings.iter().cloned()).collect();
+        for &ti in &setup.enabled_tools {
+            match crate::patterns::TOOLS[ti].name {
+                "capacitor" => {
+                    for (dir, pkg) in [("android", "@capacitor/android"), ("ios", "@capacitor/ios")] {
+                        if w.dir.join(dir).is_dir() {
+                            packages.push(pkg.into());
+                        }
+                    }
+                }
+                "size-limit" => {
+                    for &c in &chains[ws] {
+                        packages.extend(workspaces[c].manifest.dep_names().filter(|d| d.starts_with("@size-limit/")).map(String::from));
+                    }
+                }
+                "storybook" => {
+                    if strings.iter().any(|s| s == "@storybook/addon-vitest" || s == "@storybook/experimental-addon-test") {
+                        packages.extend(["vitest", "@vitest/browser", "@vitest/coverage-v8", "playwright"].map(String::from));
+                    }
+                }
+                _ => {}
+            }
+        }
         for p in packages {
             if let Some(c) = closest(ws, &p) {
                 referenced[c].insert(p);
@@ -368,7 +398,20 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
     for (ws, b, report) in pending_binaries {
         let w = &workspaces[ws];
         let setup = &setups[ws];
-        let providers = providers_cache.entry(ws).or_insert_with(|| bin_providers(&w.dir, root));
+        let providers = providers_cache.entry(ws).or_insert_with(|| {
+            let mut m = bin_providers(&w.dir, root);
+            // binaries declared by installed listed packages (works with pnpm shims too)
+            for &c in &chains[ws] {
+                for dep in workspaces[c].manifest.dep_names() {
+                    if let Some(inst) = installed.get(&workspaces[c].dir, dep) {
+                        for b in &inst.bins {
+                            m.entry(b.clone()).or_insert_with(|| dep.to_string());
+                        }
+                    }
+                }
+            }
+            m
+        });
         {
             if SYSTEM_BINARIES.contains(&b.as_str()) {
                 continue;
@@ -398,6 +441,14 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
         }
     }
 
+    if let Some(name) = std::env::var_os("TIDY_DEBUG_DEPS") {
+        let name = name.to_string_lossy().to_string();
+        for ws in 0..n {
+            if referenced[ws].contains(&name) {
+                eprintln!("dep {name}: referenced in workspace {}", workspaces[ws].rel);
+            }
+        }
+    }
     // 4. Report.
     let mut issues = Vec::new();
     for ws in 0..n {
@@ -445,6 +496,9 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
             }
             let mut seen = FxHashSet::default();
             if hosts.contains_key(name) && is_referenced(name, ws, &chains, &referenced, &hosts, &mut seen) {
+                if std::env::var_os("TIDY_DEBUG_DEPS").map(|v| v.to_string_lossy() == *name).unwrap_or(false) {
+                    eprintln!("dep {name}: kept via host dependencies {:?}", hosts.get(name));
+                }
                 continue;
             }
             if let Some(base) = name.strip_prefix("@types/") {
@@ -503,7 +557,7 @@ fn workspace_for_dir(dir: &Path, workspaces: &[Workspace]) -> usize {
 }
 
 /// Extract (working-directory, script) pairs from a GitHub workflow YAML.
-fn workflow_runs(text: &str) -> Vec<(Option<String>, String)> {
+pub fn workflow_runs(text: &str) -> Vec<(Option<String>, String)> {
     // Split into steps at `- ` list items that contain run:/uses:/name:, then read run and working-directory.
     let mut steps: Vec<Vec<&str>> = Vec::new();
     let mut step_indent: Option<usize> = None;

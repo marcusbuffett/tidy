@@ -159,23 +159,7 @@ fn map_entry_ref(ws_dir: &Path, r: &str) -> Option<String> {
         return Some(r.to_string());
     }
     // dist/foo.js → src/foo.ts etc.
-    let mut parts: Vec<&str> = r.split('/').collect();
-    if parts.len() < 2 {
-        return None;
-    }
-    if !matches!(parts[0], "dist" | "build" | "lib" | "out" | "esm" | "cjs" | "output") {
-        return None;
-    }
-    parts[0] = "src";
-    let joined = parts.join("/");
-    let stem = joined.strip_suffix(".d.ts").or_else(|| joined.rsplit_once('.').map(|(s, _)| s)).unwrap_or(&joined);
-    for ext in ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"] {
-        let cand = format!("{stem}.{ext}");
-        if ws_dir.join(&cand).is_file() {
-            return Some(cand);
-        }
-    }
-    None
+    crate::resolve::map_dist_to_src(ws_dir, r).and_then(|p| p.strip_prefix(ws_dir).ok().map(|x| x.to_string_lossy().replace('\\', "/")))
 }
 
 /// tsconfig `include`/`files`/`exclude` as pattern sets (for declaration-file entries).
@@ -234,6 +218,7 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
 
     // Root-level ignore applies to all workspaces (root-relative).
     let root_ignore = PatternSet::new(&cfg.root.ignore.as_ref().map(|s| s.to_vec()).unwrap_or_default())?;
+    let negated_ws = PatternSet::new(&crate::workspace::negated_globs(root))?;
     let ignore_ws_set = patterns::build_set(&cfg.ignore_workspaces)?;
 
     // Tool config globsets (shared).
@@ -262,6 +247,21 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
         let entry: Vec<String> = wcfg.and_then(|c| c.entry.as_ref()).map(|s| s.to_vec()).unwrap_or_else(|| default_entry.clone());
         let mut tool_entry: Vec<String> = Vec::new();
         let mut project: Vec<String> = wcfg.and_then(|c| c.project.as_ref()).map(|s| s.to_vec()).unwrap_or_else(|| default_project.clone());
+        // single-file components when the framework is present (knip "compilers")
+        for (dep, pat) in [("svelte", "**/*.svelte"), ("vue", "**/*.vue"), ("astro", "**/*.astro"), ("@mdx-js/mdx", "**/*.mdx")] {
+            let mut cur = Some(wi);
+            let mut present = false;
+            while let Some(i) = cur {
+                if workspaces[i].manifest.has_dep(dep) {
+                    present = true;
+                    break;
+                }
+                cur = workspaces[i].parent;
+            }
+            if present && wcfg.and_then(|c| c.project.as_ref()).is_none() {
+                project.push(pat.to_string());
+            }
+        }
         let mut ignore: Vec<String> = match wcfg {
             Some(c) if !std::ptr::eq(c, root_cfg) => c.ignore.as_ref().map(|s| s.to_vec()).unwrap_or_default(),
             _ => vec![],
@@ -285,7 +285,7 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
             if ov.map(|o| o.disabled).unwrap_or(false) {
                 continue;
             }
-            let enabled = tool_enabled(tool, wi, workspaces) || config_present[wi].contains(&ti) || ov.is_some();
+            let enabled = tool_enabled(tool, wi, workspaces) || (tool.enablers.is_empty() && config_present[wi].contains(&ti)) || ov.map(|o| !o.disabled).unwrap_or(false);
             if !enabled {
                 continue;
             }
@@ -316,6 +316,26 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
         }
         for s in scripts::script_file_refs(&ws.manifest, &ws.dir) {
             exact_entries.insert(s);
+        }
+        for name in ["tidy.ts", "tidy.js", "knip.ts", "knip.js", "knip.mjs", "knip.config.ts", "knip.config.js"] {
+            if ws.dir.join(name).is_file() {
+                exact_entries.insert(name.to_string());
+            }
+        }
+        // Scripts run from GitHub workflows (`node scripts/x.mjs`) are entry files.
+        if ws.rel == "." {
+            for f in &all {
+                let rel = rel_posix(root, f);
+                if rel.starts_with(".github/workflows/") && (rel.ends_with(".yml") || rel.ends_with(".yaml")) {
+                    if let Ok(text) = std::fs::read_to_string(f) {
+                        for (_, script) in crate::deps::workflow_runs(&text) {
+                            for file in scripts::shell_text(&script, &ws.manifest, &ws.dir).files {
+                                exact_entries.insert(file);
+                            }
+                        }
+                    }
+                }
+            }
         }
         ignore.retain(|p| !p.is_empty());
         let mut ignore_dependencies = crate::config::matchers(&root_cfg.ignore_dependencies);
@@ -354,6 +374,9 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
     for (i, p) in all.into_iter().enumerate() {
         let ws = file_ws[i];
         let rel = all_rel[i].clone();
+        if negated_ws.is_match(&rel) {
+            continue;
+        }
         let ws_rel = rel_posix(&workspaces[ws].dir, &p);
         let s = &setups[ws];
         let is_ignored = root_ignore.is_match(&rel) || s.ignore.is_match(&ws_rel) || s.is_ignored_workspace;

@@ -84,22 +84,37 @@ pub struct PluginOverride {
 const CONFIG_FILES: &[&str] = &[
     "tidy.json",
     "tidy.jsonc",
+    "tidy.ts",
+    "tidy.js",
     "knip.json",
     "knip.jsonc",
     ".knip.json",
     ".knip.jsonc",
+    "knip.ts",
+    "knip.js",
+    "knip.mjs",
+    "knip.config.ts",
+    "knip.config.js",
 ];
 
 pub fn load(root: &Path, explicit: Option<&Path>) -> Result<(RawConfig, Option<PathBuf>)> {
+    let parse_any = |p: &Path, text: &str| -> Result<RawConfig> {
+        let is_code = p.extension().map(|e| matches!(e.to_str(), Some("ts" | "js" | "mjs" | "mts" | "cjs" | "cts"))).unwrap_or(false);
+        if is_code {
+            parse_ts_config(p, text)
+        } else {
+            parse_config(text)
+        }
+    };
     if let Some(p) = explicit {
         let text = std::fs::read_to_string(p).with_context(|| format!("reading {}", p.display()))?;
-        return Ok((parse_config(&text)?, Some(p.to_path_buf())));
+        return Ok((parse_any(p, &text).with_context(|| format!("parsing {}", p.display()))?, Some(p.to_path_buf())));
     }
     for name in CONFIG_FILES {
         let p = root.join(name);
         if p.is_file() {
             let text = std::fs::read_to_string(&p)?;
-            return Ok((parse_config(&text).with_context(|| format!("parsing {}", p.display()))?, Some(p)));
+            return Ok((parse_any(&p, &text).with_context(|| format!("parsing {}", p.display()))?, Some(p)));
         }
     }
     // package.json "knip" / "tidy" key
@@ -120,6 +135,13 @@ pub fn load(root: &Path, explicit: Option<&Path>) -> Result<(RawConfig, Option<P
 fn parse_config(text: &str) -> Result<RawConfig> {
     // json5 is a superset of JSONC: comments and trailing commas are fine.
     let v: Value = json5::from_str(text).context("config is not valid JSON/JSONC")?;
+    Ok(serde_json::from_value(v)?)
+}
+
+/// Statically evaluate a `knip.ts`/`tidy.ts` config: the default export (or the object passed to
+/// `defineConfig`, or the initializer of the exported variable) must be a literal object.
+fn parse_ts_config(path: &Path, text: &str) -> Result<RawConfig> {
+    let v = crate::jsvalue::default_export_literal(path, text).context("config must export a literal object (no runtime evaluation)")?;
     Ok(serde_json::from_value(v)?)
 }
 

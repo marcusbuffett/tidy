@@ -21,6 +21,8 @@ pub struct Module {
     pub is_config: bool,
     pub dev_entry: bool,
     pub tool_entry: bool,
+    /// Workspace setting: report exports of entry files too.
+    pub include_entry_exports: bool,
     pub reachable: bool,
     /// Per export: demanded members (None = never imported).
     pub export_used: Vec<Option<Members>>,
@@ -42,7 +44,7 @@ pub struct Timings {
 }
 
 fn is_code(path: &Path) -> bool {
-    path.to_str().map(is_source_ext).unwrap_or(false)
+    path.to_str().map(is_source_ext).unwrap_or(false) || extract::is_component_file(path)
 }
 
 /// Collect quoted strings from non-code config files (json/yaml/toml/...).
@@ -132,6 +134,7 @@ pub fn build(project: &Project, resolvers: &Resolvers, workspaces_dirs: &[PathBu
             is_config: f.is_config,
             dev_entry: f.dev_entry,
             tool_entry: f.tool_entry,
+            include_entry_exports: project.setups[f.ws].include_entry_exports,
             reachable: false,
             export_used: vec![None; n],
         });
@@ -207,6 +210,7 @@ pub fn build(project: &Project, resolvers: &Resolvers, workspaces_dirs: &[PathBu
                 is_config: false,
                 dev_entry: false,
                 tool_entry: false,
+                include_entry_exports: false,
                 reachable: false,
                 export_used: vec![None; n],
             });
@@ -216,6 +220,27 @@ pub fn build(project: &Project, resolvers: &Resolvers, workspaces_dirs: &[PathBu
     }
     let _ = t1;
 
+    // Files referenced from config files (setup files, reporters, plugins) are consumed by the tool.
+    let mut config_targets: Vec<usize> = Vec::new();
+    for m in &modules {
+        if !m.is_config {
+            continue;
+        }
+        for (ii, r) in &m.edges {
+            if matches!(m.facts.imports[*ii].kind, ImportKind::ConfigRef | ImportKind::Url | ImportKind::Glob | ImportKind::Dynamic) {
+                if let Target::Internal(p) = &r.target {
+                    if let Some(&t) = by_path.get(p) {
+                        config_targets.push(t);
+                    }
+                }
+            }
+        }
+    }
+    for t in config_targets {
+        let m = &mut modules[t];
+        m.is_entry = true;
+        m.tool_entry = true;
+    }
     let t2 = std::time::Instant::now();
     let mut graph = Graph { modules, by_path, memo: FxHashMap::default() };
     graph.reachability();
@@ -230,13 +255,27 @@ fn add_config_refs(facts: &mut FileFacts) {
     let existing: FxHashSet<String> = facts.imports.iter().map(|i| i.specifier.clone()).collect();
     let strings = facts.strings.clone();
     for s in strings {
-        if !(s.starts_with("./") || s.starts_with("../")) || s.contains('*') || s.contains(' ') || s.len() > 200 {
+        if s.contains(' ') || s.len() > 200 || s.is_empty() || existing.contains(&s) {
             continue;
         }
-        if existing.contains(&s) {
+        if s.contains('*') {
+            // build/test entry globs only under entry-like keys (`entry: ['src/*.ts']`, rollup `input`, storybook `stories`)
+            const ENTRY_KEYS: &[&str] = &["entry", "entries", "input", "stories", "testMatch", "setupFiles", "globalSetup"];
+            let keyed = facts.keyed_strings.iter().any(|(k, v)| v == &s && ENTRY_KEYS.contains(&k.as_str()));
+            if !keyed || s.starts_with('!') {
+                continue;
+            }
+            facts.imports.push(extract::Import { specifier: s, kind: ImportKind::Glob, is_type: false, names: Names::Named(vec![]), start: 0, line: 0, col: 0 });
             continue;
         }
-        facts.imports.push(extract::Import { specifier: s, kind: ImportKind::ConfigRef, is_type: false, names: Names::Named(vec![]), start: 0, line: 0, col: 0 });
+        let relative = s.starts_with("./") || s.starts_with("../");
+        // bare file names like `test-setup.ts` or `src/setup.ts` are resolved relative to the config file
+        let looks_like_file = !relative && !s.starts_with('/') && !s.starts_with('@') && !s.starts_with('#') && !s.contains(':') && is_source_ext(&s) && !s.starts_with("node_modules");
+        if !relative && !looks_like_file {
+            continue;
+        }
+        let spec = if relative { s } else { format!("./{s}") };
+        facts.imports.push(extract::Import { specifier: spec, kind: ImportKind::ConfigRef, is_type: false, names: Names::Named(vec![]), start: 0, line: 0, col: 0 });
     }
 }
 
@@ -346,6 +385,18 @@ impl Graph {
     fn propagate_exports(&mut self) {
         let mut all_marked: Vec<bool> = vec![false; self.modules.len()];
         let mut visiting: FxHashMap<(usize, String), Option<(usize, usize)>> = std::mem::take(&mut self.memo);
+        // `export * from './x'` in an entry file publishes x's exports (knip: reExportingEntryFile).
+        for m in 0..self.modules.len() {
+            if !self.modules[m].is_entry || self.modules[m].include_entry_exports {
+                continue;
+            }
+            let alls: Vec<usize> = self.modules[m].facts.export_alls.iter().map(|ea| ea.import).collect();
+            for imp in alls {
+                for t in self.targets_of_import(m, imp) {
+                    self.mark_all_inner(t, &mut all_marked, &mut visiting);
+                }
+            }
+        }
         for m in 0..self.modules.len() {
             let edges: Vec<(usize, Option<usize>)> = self.modules[m]
                 .edges

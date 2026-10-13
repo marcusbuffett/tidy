@@ -209,6 +209,30 @@ impl Workspace {
 }
 
 /// Discover workspaces: root + any package dirs matched by workspace globs (npm/yarn/bun/pnpm).
+/// Workspace globs that are negated (`!examples/vue/2*`): files under them are ignored entirely.
+pub fn negated_globs(root: &Path) -> Vec<String> {
+    let mut globs: Vec<String> = Vec::new();
+    if let Ok(m) = read_manifest(&root.join("package.json")) {
+        match m.raw.get("workspaces") {
+            Some(Value::Array(a)) => globs.extend(a.iter().filter_map(|v| v.as_str().map(str::to_string))),
+            Some(Value::Object(o)) => {
+                if let Some(Value::Array(a)) = o.get("packages") {
+                    globs.extend(a.iter().filter_map(|v| v.as_str().map(str::to_string)));
+                }
+            }
+            _ => {}
+        }
+    }
+    if let Ok(text) = std::fs::read_to_string(root.join("pnpm-workspace.yaml")) {
+        if let Ok(Value::Object(o)) = serde_yaml::from_str::<Value>(&text) {
+            if let Some(Value::Array(a)) = o.get("packages") {
+                globs.extend(a.iter().filter_map(|v| v.as_str().map(str::to_string)));
+            }
+        }
+    }
+    globs.into_iter().filter(|g| g.starts_with('!')).map(|g| format!("{}/**", g[1..].trim_end_matches('/'))).collect()
+}
+
 pub fn discover(root: &Path) -> Result<Vec<Workspace>> {
     let root_manifest = read_manifest(&root.join("package.json"))?;
     let mut globs: Vec<String> = Vec::new();
