@@ -120,7 +120,8 @@ def counters_from_json(data):
     for issue in data.get('issues', []):
         for k in COMPARED[1:-1]:
             c[k] += len(issue.get(k, []))
-        c['enumMembers'] += sum(len(v) for v in issue.get('enumMembers', {}).values())
+        em = issue.get('enumMembers', [])
+        c['enumMembers'] += len(em) if isinstance(em, list) else sum(len(v) for v in em.values())
     return c
 
 

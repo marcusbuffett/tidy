@@ -95,14 +95,14 @@ questions; that is where most of its time goes. tidy never type-checks:
 ## Install
 
 ```
-cargo install --git https://github.com/marcusbuffett/tidy --tag v0.2.0
+cargo install --git https://github.com/marcusbuffett/tidy --tag v0.2.1
 ```
 
 With [mise](https://mise.jdx.dev), pin it per project in `mise.toml`:
 
 ```toml
 [tools]
-"cargo:https://github.com/marcusbuffett/tidy" = "tag:v0.2.0"
+"cargo:https://github.com/marcusbuffett/tidy" = "tag:v0.2.1"
 ```
 
 ## Usage

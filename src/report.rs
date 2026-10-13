@@ -57,22 +57,19 @@ pub fn json(issues: &[Issue]) -> String {
             for k in ["dependencies", "devDependencies", "optionalPeerDependencies", "unlisted", "binaries", "unresolved", "exports", "types"] {
                 m.insert(k.into(), Value::Array(vec![]));
             }
-            m.insert("enumMembers".into(), Value::Object(Map::new()));
-            m.insert("classMembers".into(), Value::Object(Map::new()));
+            m.insert("enumMembers".into(), Value::Array(vec![]));
+            m.insert("classMembers".into(), Value::Array(vec![]));
             m.insert("duplicates".into(), Value::Array(vec![]));
             m
         });
-        let item = json!({ "name": i.name, "line": i.line, "col": i.col, "pos": i.pos });
-        match i.kind {
+        // knip's shape: members are flat items carrying their enum/class as `namespace`
+        let item = match i.kind {
             IssueKind::EnumMembers | IssueKind::ClassMembers => {
-                let parent = i.parent.clone().unwrap_or_default();
-                let obj = entry.get_mut(i.kind.key()).unwrap().as_object_mut().unwrap();
-                obj.entry(parent).or_insert_with(|| Value::Array(vec![])).as_array_mut().unwrap().push(item);
+                json!({ "namespace": i.parent.clone().unwrap_or_default(), "name": i.name, "line": i.line, "col": i.col, "pos": i.pos })
             }
-            _ => {
-                entry.get_mut(i.kind.key()).unwrap().as_array_mut().unwrap().push(item);
-            }
-        }
+            _ => json!({ "name": i.name, "line": i.line, "col": i.col, "pos": i.pos }),
+        };
+        entry.get_mut(i.kind.key()).unwrap().as_array_mut().unwrap().push(item);
     }
     order.sort();
     let issues_json: Vec<Value> = order.iter().map(|f| Value::Object(per_file.remove(f).unwrap())).collect();
