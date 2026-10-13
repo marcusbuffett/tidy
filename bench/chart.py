@@ -6,9 +6,9 @@ usage: bench/chart.py  (edit DATA below after running bench/compare.sh)
 import os
 
 DATA = [  # (label, files, knip seconds, tidy seconds)
-    ("micro\n24 workspaces, 8.1k files", 8142, 13.48, 0.30),
-    ("TanStack/query\n102 workspaces, 1.4k files", 1442, 2.43, 0.20),
-    ("chessbook\n488 files", 488, 2.12, 0.06),
+    ("micro\n24 workspaces, 8.1k files", 8142, 12.98, 0.25),
+    ("TanStack/query\n102 workspaces, 1.4k files", 1442, 2.25, 0.18),
+    ("chessbook\n4 workspaces, 488 files", 488, 1.35, 0.05),
 ]
 OUT = os.path.join(os.path.dirname(__file__), "..", "docs", "benchmark.svg")
 

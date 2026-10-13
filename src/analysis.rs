@@ -102,9 +102,7 @@ pub fn analyze(project: &Project, graph: &Graph, setups: &[WorkspaceSetup], opts
                         continue;
                     }
                     let ieuf = &setup.ignore_exports_used_in_file;
-                    if e.used_in_file
-                        && (e.is_binding_element || ieuf.applies(if e.kind == ExportKind::Type { "types" } else { "exports" }) || ieuf.applies(kind_key))
-                    {
+                    if e.used_in_file && (ieuf.applies(if e.kind == ExportKind::Type { "types" } else { "exports" }) || ieuf.applies(kind_key)) {
                         continue;
                     }
                     let kind = if matches!(e.kind, ExportKind::Type | ExportKind::Enum) { IssueKind::Types } else { IssueKind::Exports };

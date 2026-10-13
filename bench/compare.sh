@@ -3,7 +3,7 @@
 # usage: bench/compare.sh <repo-dir> [runs] [knip-binary]
 set -euo pipefail
 repo=${1:?repo dir}; runs=${2:-5}; knip=${3:-$repo/node_modules/.bin/knip}
-tidy=$(dirname "$0")/../target/release/tidy
+tidy=$(cd "$(dirname "$0")/.." && pwd)/target/release/tidy
 cd "$repo"
 best() { sort -n | head -1; }
 median() { sort -n | awk '{a[NR]=$1} END {print a[int((NR+1)/2)]}'; }

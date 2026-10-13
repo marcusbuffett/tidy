@@ -4,19 +4,19 @@
 <text x='216' y='62' text-anchor='end' font-size='15' font-weight='600' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>micro</text>
 <text x='216' y='82' text-anchor='end' font-size='12' fill='#777' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>24 workspaces, 8.1k files</text>
 <rect x='230' y='48' width='420.0' height='20' rx='3' fill='#c9ccd1'/>
-<text x='658.0' y='63' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>knip 13.48s</text>
-<rect x='230' y='74' width='9.3' height='20' rx='3' fill='#2f81f7'/>
-<text x='247.3' y='89' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>tidy 0.30s  (45x)</text>
+<text x='658.0' y='63' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>knip 12.98s</text>
+<rect x='230' y='74' width='8.1' height='20' rx='3' fill='#2f81f7'/>
+<text x='246.1' y='89' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>tidy 0.25s  (52x)</text>
 <text x='216' y='142' text-anchor='end' font-size='15' font-weight='600' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>TanStack/query</text>
 <text x='216' y='162' text-anchor='end' font-size='12' fill='#777' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>102 workspaces, 1.4k files</text>
-<rect x='230' y='128' width='75.7' height='20' rx='3' fill='#c9ccd1'/>
-<text x='313.7' y='143' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>knip 2.43s</text>
-<rect x='230' y='154' width='6.2' height='20' rx='3' fill='#2f81f7'/>
-<text x='244.2' y='169' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>tidy 0.20s  (12x)</text>
+<rect x='230' y='128' width='72.8' height='20' rx='3' fill='#c9ccd1'/>
+<text x='310.8' y='143' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>knip 2.25s</text>
+<rect x='230' y='154' width='5.8' height='20' rx='3' fill='#2f81f7'/>
+<text x='243.8' y='169' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>tidy 0.18s  (12x)</text>
 <text x='216' y='222' text-anchor='end' font-size='15' font-weight='600' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>chessbook</text>
-<text x='216' y='242' text-anchor='end' font-size='12' fill='#777' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>488 files</text>
-<rect x='230' y='208' width='66.1' height='20' rx='3' fill='#c9ccd1'/>
-<text x='304.1' y='223' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>knip 2.12s</text>
+<text x='216' y='242' text-anchor='end' font-size='12' fill='#777' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>4 workspaces, 488 files</text>
+<rect x='230' y='208' width='43.7' height='20' rx='3' fill='#c9ccd1'/>
+<text x='281.7' y='223' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>knip 1.35s</text>
 <rect x='230' y='234' width='3.0' height='20' rx='3' fill='#2f81f7'/>
-<text x='241.0' y='249' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>tidy 0.06s  (35x)</text>
+<text x='241.0' y='249' font-size='13' fill='#222' font-family='-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'>tidy 0.05s  (27x)</text>
 </svg>

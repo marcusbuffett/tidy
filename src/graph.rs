@@ -47,6 +47,20 @@ fn is_code(path: &Path) -> bool {
     path.to_str().map(is_source_ext).unwrap_or(false) || extract::is_component_file(path)
 }
 
+/// (key, string) pairs of a JSON document: `"ignorePatterns": ["src/gen.ts"]` → ("ignorePatterns", "src/gen.ts").
+fn keyed_json_strings(v: &serde_json::Value, key: Option<&str>, out: &mut Vec<(String, String)>) {
+    match v {
+        serde_json::Value::String(s) => {
+            if let Some(k) = key {
+                out.push((k.to_string(), s.clone()));
+            }
+        }
+        serde_json::Value::Array(a) => a.iter().for_each(|x| keyed_json_strings(x, key, out)),
+        serde_json::Value::Object(o) => o.iter().for_each(|(k, x)| keyed_json_strings(x, Some(k), out)),
+        _ => {}
+    }
+}
+
 /// Collect quoted strings from non-code config files (json/yaml/toml/...).
 fn strings_from_text(text: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -106,8 +120,15 @@ pub fn build(project: &Project, resolvers: &Resolvers, workspaces_dirs: &[PathBu
                     Err(_) => FileFacts::default(),
                 }
             } else if f.is_config {
-                let strings = std::fs::read_to_string(&f.path).map(|t| strings_from_text(&t)).unwrap_or_default();
-                FileFacts { strings, ..Default::default() }
+                let text = std::fs::read_to_string(&f.path).unwrap_or_default();
+                let strings = strings_from_text(&text);
+                let mut keyed_strings = Vec::new();
+                if f.path.extension().map(|e| e == "json" || e == "jsonc" || e == "json5").unwrap_or(false) {
+                    if let Ok(v) = json5::from_str::<serde_json::Value>(&text) {
+                        keyed_json_strings(&v, None, &mut keyed_strings);
+                    }
+                }
+                FileFacts { strings, keyed_strings, ..Default::default() }
             } else {
                 FileFacts::default()
             };
@@ -240,7 +261,7 @@ pub fn build(project: &Project, resolvers: &Resolvers, workspaces_dirs: &[PathBu
             continue;
         }
         for (ii, r) in &m.edges {
-            if matches!(m.facts.imports[*ii].kind, ImportKind::ConfigRef | ImportKind::Url | ImportKind::Glob | ImportKind::Dynamic) {
+            if matches!(m.facts.imports[*ii].kind, ImportKind::ConfigRef | ImportKind::Url | ImportKind::Glob | ImportKind::Dynamic | ImportKind::Loader) {
                 if let Target::Internal(p) = &r.target {
                     if let Some(&t) = by_path.get(p) {
                         config_targets.push(t);
@@ -306,6 +327,11 @@ fn add_config_refs(facts: &mut FileFacts) {
             }
         }
         let relative = s.starts_with("./") || s.starts_with("../");
+        // strings under ignore/exclude keys name files the tool skips, not entries
+        const EXCLUDE_KEYS: &[&str] = &["ignore", "ignores", "ignorePatterns", "ignoreFiles", "exclude", "external", "externals", "clientFiles", "ssrFiles"];
+        if facts.keyed_strings.iter().any(|(k, v)| v == &s && EXCLUDE_KEYS.contains(&k.as_str())) {
+            continue;
+        }
         // bare file names like `test-setup.ts` or `src/setup.ts` are resolved relative to the config file
         let looks_like_file = !relative
             && !s.starts_with('/')
@@ -470,7 +496,17 @@ impl Graph {
                 .collect();
             for (ii, target) in edges {
                 let Some(t) = target else { continue };
+                // `export { x } from './m'` consumes `x` only when the re-export itself is used (see
+                // demand); re-exports from entry files are public and consume their targets directly
+                if self.modules[m].facts.imports[ii].kind == ImportKind::ReExport && !self.modules[m].is_entry {
+                    continue;
+                }
                 let names = self.modules[m].facts.imports[ii].names.clone();
+                // a loader wants the default export; modules without one are consumed whole
+                if self.modules[m].facts.imports[ii].kind == ImportKind::Loader && !self.modules[t].facts.exports.iter().any(|e| e.name == "default") {
+                    self.mark_all_inner(t, &mut all_marked, &mut visiting);
+                    continue;
+                }
                 match names {
                     Names::All => self.mark_all_inner(t, &mut all_marked, &mut visiting),
                     Names::Named(list) => {

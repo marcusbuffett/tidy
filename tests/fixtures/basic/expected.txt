@@ -11,6 +11,7 @@ exports src/lib/api.ts:2:23 fetchOne
 exports src/lib/colors.ts:2:14 blue
 exports src/lib/colors.ts:3:14 green
 exports src/lib/commands.ts:2:20 unusedReexport
+exports src/lib/heavy.tsx:2:14 alsoHeavy
 exports src/lib/page.ts:2:17 unrendered
 exports src/lib/runner.ts:3:17 stop
 exports src/lib/util.ts:2:17 untraced

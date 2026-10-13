@@ -62,6 +62,8 @@ pub enum ImportKind {
     Static,
     ReExport,
     Dynamic,
+    /// `lazy(() => import('./x'))`: a loader consumes only the default export when the module has one.
+    Loader,
     Require,
     Mock,
     /// `import.meta.glob('./x/*.ts')` / `require.context(...)`: specifier is a glob.
@@ -586,8 +588,13 @@ impl<'s, 'a> Extractor<'s, 'a> {
                 }
                 AstKind::ImportExpression(ie) => {
                     if let Some(spec) = string_arg(&ie.source) {
-                        let names = self.names_from_parent(node.id());
-                        self.push_import(spec, ImportKind::Dynamic, false, names, ie.span.start);
+                        if self.is_inline_loader(node.id()) {
+                            let names = Names::Named(vec![ImportedName { name: "default".into(), is_type: false, members: Members::All }]);
+                            self.push_import(spec, ImportKind::Loader, false, names, ie.span.start);
+                        } else {
+                            let names = self.names_from_parent(node.id());
+                            self.push_import(spec, ImportKind::Dynamic, false, names, ie.span.start);
+                        }
                     }
                 }
                 AstKind::CallExpression(call) => self.call_expression(node.id(), call),
@@ -605,7 +612,7 @@ impl<'s, 'a> Extractor<'s, 'a> {
                 AstKind::AssignmentExpression(assign) => self.assignment(assign),
                 AstKind::StringLiteral(s) if self.collect_strings => {
                     self.facts.strings.push(s.value.to_string());
-                    if s.value.contains('*') {
+                    if s.value.contains('*') || s.value.contains('/') || s.value.contains('.') {
                         // nearest enclosing object property key
                         let mut pid = nodes.parent_id(node.id());
                         let mut key: Option<String> = None;
@@ -731,11 +738,18 @@ impl<'s, 'a> Extractor<'s, 'a> {
 
     /// Fill `referenced_in`: for every export with a symbol, find the top-level statements that
     /// reference it and map those statements back to the exports they declare.
+    /// knip's declaration-emit rule: an export stays alive while it is referenced (in a type position)
+    /// from the *signature* of a used exported value: parameter/return/variable annotations, class
+    /// member types, `typeof x`. References inside function bodies or inside other type aliases and
+    /// interfaces do not count (tsc would flag those as unused too).
     fn compute_referenced_in(&mut self) {
         let nodes = self.sem.nodes();
-        // top-level statement span start → export indices declared by it
+        // top-level statement span start → value export indices declared by it
         let mut by_stmt: FxHashMap<u32, Vec<usize>> = FxHashMap::default();
         for (i, e) in self.facts.exports.iter().enumerate() {
+            if matches!(e.kind, ExportKind::Type | ExportKind::Enum | ExportKind::Namespace) {
+                continue;
+            }
             if let Some(sym) = e.symbol {
                 let decl = self.sem.symbol_declaration(sym);
                 let mut id = decl.id();
@@ -753,28 +767,52 @@ impl<'s, 'a> Extractor<'s, 'a> {
             let Some(sym) = self.facts.exports[i].symbol else { continue };
             let mut refs: Vec<usize> = Vec::new();
             for r in self.sem.symbol_references(sym) {
-                // only references in type positions: `Foo`, `typeof foo`, `Foo.Bar` as a type
                 let mut pid = nodes.parent_id(r.node_id());
                 while matches!(nodes.kind(pid), AstKind::TSQualifiedName(_)) {
                     pid = nodes.parent_id(pid);
                 }
-                let is_type_query = matches!(nodes.kind(pid), AstKind::TSTypeQuery(_));
-                if !is_type_query && !matches!(nodes.kind(pid), AstKind::TSTypeReference(_)) {
+                if !matches!(nodes.kind(pid), AstKind::TSTypeQuery(_) | AstKind::TSTypeReference(_)) {
                     continue;
                 }
+                // Walk to the top-level statement. A parameter / return-type / class-member annotation
+                // (at any depth) is part of the emitted declaration; a reference inside a function body
+                // that is not such an annotation is an implementation detail.
                 let mut id = r.node_id();
+                let mut signature = false;
+                let mut in_body = false;
                 loop {
                     let pid = nodes.parent_id(id);
                     if matches!(nodes.kind(pid), AstKind::Program(_)) {
                         break;
                     }
+                    if !in_body {
+                        match nodes.kind(pid) {
+                            AstKind::FormalParameter(_) | AstKind::PropertyDefinition(_) | AstKind::MethodDefinition(_) => signature = true,
+                            AstKind::Function(_) | AstKind::ArrowFunctionExpression(_) if matches!(nodes.kind(id), AstKind::TSTypeAnnotation(_)) => {
+                                signature = true
+                            }
+                            _ => {}
+                        }
+                    }
+                    if !signature {
+                        if matches!(nodes.kind(pid), AstKind::FunctionBody(_)) {
+                            in_body = true;
+                        }
+                        // expression-bodied arrow: `() => ({} as T)` is a body reference, `(x: T) =>` is not
+                        if let AstKind::ArrowFunctionExpression(a) = nodes.kind(pid) {
+                            if a.body.span().start <= nodes.kind(id).span().start && nodes.kind(id).span().end <= a.body.span().end {
+                                in_body = true;
+                            }
+                        }
+                    }
                     id = pid;
+                }
+                if in_body && !signature {
+                    continue;
                 }
                 if let Some(list) = by_stmt.get(&nodes.kind(id).span().start) {
                     for &j in list {
-                        // knip: a plain type reference only counts inside a *type* export; `typeof x` counts anywhere
-                        let container_is_type = matches!(self.facts.exports[j].kind, ExportKind::Type | ExportKind::Enum | ExportKind::Namespace);
-                        if j != i && !refs.contains(&j) && (is_type_query || container_is_type) {
+                        if j != i && !refs.contains(&j) {
                             refs.push(j);
                         }
                     }
@@ -911,7 +949,17 @@ impl<'s, 'a> Extractor<'s, 'a> {
         let idx = self.push_import(decl.source.value.to_string(), ImportKind::ReExport, type_only, Names::Named(names), decl.span.start);
         for (exported, imported, is_type, start) in pending {
             let kind = if is_type { ExportKind::Type } else { ExportKind::Unknown };
+            // `import { X } from './m'; export { X } from './m'`: the local binding's references decide
+            // type visibility for the re-export (see compute_referenced_in)
+            let local = self
+                .import_symbols
+                .iter()
+                .find(|(_, (i, n))| *n == imported && self.facts.imports[*i].specifier == decl.source.value.as_str())
+                .map(|(sym, _)| *sym);
             self.push_export(exported, kind, vec![], start, false, Members::Named(vec![]), Some((idx, imported)), tags.clone());
+            if local.is_some() {
+                self.set_symbol(local);
+            }
         }
     }
 
@@ -931,6 +979,8 @@ impl<'s, 'a> Extractor<'s, 'a> {
                 if let Some((idx, imported)) = self.import_symbols.get(&sym).cloned() {
                     let kind = if is_type { ExportKind::Type } else { ExportKind::Unknown };
                     self.push_export(exported, kind, vec![], start, false, Members::Named(vec![]), Some((idx, imported)), tags.clone());
+                    // the import binding's references decide type visibility (see compute_referenced_in)
+                    self.set_symbol(Some(sym));
                     continue;
                 }
                 let (kind, members) = self.classify_symbol(sym);
@@ -1081,6 +1131,33 @@ impl<'s, 'a> Extractor<'s, 'a> {
     }
 
     /// Names demanded from a dynamic import / require() based on how the call result is consumed.
+    /// `fn(() => import('./x'))` / `fn(async () => { return await import('./x') })`: the import is the
+    /// whole result of a function passed as a call argument (route loaders, `lazy()`).
+    fn is_inline_loader(&self, id: oxc_semantic::NodeId) -> bool {
+        let nodes = self.sem.nodes();
+        let mut pid = nodes.parent_id(id);
+        while matches!(nodes.kind(pid), AstKind::AwaitExpression(_) | AstKind::ParenthesizedExpression(_) | AstKind::TSAsExpression(_)) {
+            pid = nodes.parent_id(pid);
+        }
+        // `() => import('./x')`: expression-bodied arrow, the import is the body itself
+        let func = if matches!(nodes.kind(pid), AstKind::ArrowFunctionExpression(_)) {
+            pid
+        } else if matches!(nodes.kind(pid), AstKind::ReturnStatement(_)) {
+            let body = nodes.parent_id(pid);
+            if !matches!(nodes.kind(body), AstKind::FunctionBody(_)) {
+                return false;
+            }
+            let func = nodes.parent_id(body);
+            if !matches!(nodes.kind(func), AstKind::ArrowFunctionExpression(_) | AstKind::Function(_)) {
+                return false;
+            }
+            func
+        } else {
+            return false;
+        };
+        matches!(nodes.kind(nodes.parent_id(func)), AstKind::CallExpression(_))
+    }
+
     fn names_from_parent(&self, id: oxc_semantic::NodeId) -> Names {
         let nodes = self.sem.nodes();
         let mut pid = nodes.parent_id(id);
