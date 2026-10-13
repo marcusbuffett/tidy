@@ -14,8 +14,6 @@ pub struct ProjectFile {
     pub path: PathBuf,
     /// Root-relative posix path.
     pub rel: String,
-    /// Workspace-relative posix path.
-    pub ws_rel: String,
     pub ws: usize,
     pub is_project: bool,
     pub is_entry: bool,
@@ -60,10 +58,9 @@ impl ExportsUsedInFile {
     fn from_value(v: Option<&serde_json::Value>) -> ExportsUsedInFile {
         match v {
             Some(serde_json::Value::Bool(b)) => ExportsUsedInFile { all: *b, kinds: vec![] },
-            Some(serde_json::Value::Object(o)) => ExportsUsedInFile {
-                all: false,
-                kinds: o.iter().filter(|(_, v)| v.as_bool().unwrap_or(false)).map(|(k, _)| k.clone()).collect(),
-            },
+            Some(serde_json::Value::Object(o)) => {
+                ExportsUsedInFile { all: false, kinds: o.iter().filter(|(_, v)| v.as_bool().unwrap_or(false)).map(|(k, _)| k.clone()).collect() }
+            }
             _ => ExportsUsedInFile::default(),
         }
     }
@@ -83,17 +80,10 @@ pub struct Project {
 fn walk(root: &Path) -> Vec<PathBuf> {
     let out: Mutex<Vec<PathBuf>> = Mutex::new(Vec::with_capacity(4096));
     let mut builder = ignore::WalkBuilder::new(root);
-    builder
-        .hidden(false)
-        .git_ignore(true)
-        .git_global(false)
-        .git_exclude(true)
-        .require_git(false)
-        .follow_links(false)
-        .filter_entry(|e| {
-            let name = e.file_name();
-            name != "node_modules" && name != ".git" && name != ".hg" && name != ".svn" && name != ".yarn" && name != ".pnpm-store"
-        });
+    builder.hidden(false).git_ignore(true).git_global(false).git_exclude(true).require_git(false).follow_links(false).filter_entry(|e| {
+        let name = e.file_name();
+        name != "node_modules" && name != ".git" && name != ".hg" && name != ".svn" && name != ".yarn" && name != ".pnpm-store"
+    });
     builder.build_parallel().run(|| {
         Box::new(|entry| {
             if let Ok(e) = entry {
@@ -168,9 +158,8 @@ fn map_entry_ref(ws_dir: &Path, r: &str) -> Option<String> {
 fn tsconfig_dts_patterns(dir: &Path) -> Option<(PatternSet, PatternSet)> {
     let text = std::fs::read_to_string(dir.join("tsconfig.json")).ok()?;
     let v: serde_json::Value = json5::from_str(&text).ok()?;
-    let list = |key: &str| -> Option<Vec<String>> {
-        v.get(key).and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect())
-    };
+    let list =
+        |key: &str| -> Option<Vec<String>> { v.get(key).and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect()) };
     let mut include: Vec<String> = list("include").unwrap_or_else(|| vec!["**/*".into()]);
     include.extend(list("files").unwrap_or_default());
     let include: Vec<String> = include
@@ -281,7 +270,9 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
     let ws_rels: Vec<String> = all.iter().enumerate().map(|(i, p)| rel_posix(&workspaces[file_ws[i]].dir, p)).collect();
     for (i, ws_rel) in ws_rels.iter().enumerate() {
         let base = ws_rel.rsplit('/').next().unwrap_or(ws_rel);
-        let candidate = literal_names.contains(base) || (has_wildcard_tail && (ws_rel.starts_with('.') || ws_rel.contains("/.") || ws_rel.ends_with(".prisma") || ws_rel.ends_with(".yml") || ws_rel.ends_with(".yaml")));
+        let candidate = literal_names.contains(base)
+            || (has_wildcard_tail
+                && (ws_rel.starts_with('.') || ws_rel.contains("/.") || ws_rel.ends_with(".prisma") || ws_rel.ends_with(".yml") || ws_rel.ends_with(".yaml")));
         if !candidate {
             continue;
         }
@@ -292,7 +283,8 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
 
     crate::perf("assign+toolscan", t);
     let t = std::time::Instant::now();
-    let default_entry: Vec<String> = ["{index,cli,main}.{js,mjs,cjs,jsx,ts,tsx,mts,cts}", "src/{index,cli,main}.{js,mjs,cjs,jsx,ts,tsx,mts,cts}"].iter().map(|s| s.to_string()).collect();
+    let default_entry: Vec<String> =
+        ["{index,cli,main}.{js,mjs,cjs,jsx,ts,tsx,mts,cts}", "src/{index,cli,main}.{js,mjs,cjs,jsx,ts,tsx,mts,cts}"].iter().map(|s| s.to_string()).collect();
     let default_project: Vec<String> = vec!["**/*.{js,mjs,cjs,jsx,ts,tsx,mts,cts}".into()];
 
     let mut setups = Vec::with_capacity(workspaces.len());
@@ -340,7 +332,9 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
             if ov.map(|o| o.disabled).unwrap_or(false) {
                 continue;
             }
-            let enabled = tool_enabled(tool, wi, workspaces) || (tool.enablers.is_empty() && config_present[wi].contains(&ti)) || ov.map(|o| !o.disabled).unwrap_or(false);
+            let enabled = tool_enabled(tool, wi, workspaces)
+                || (tool.enablers.is_empty() && config_present[wi].contains(&ti))
+                || ov.map(|o| !o.disabled).unwrap_or(false);
             if !enabled {
                 continue;
             }
@@ -449,7 +443,17 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
         if !is_entry && !is_project && !is_config {
             continue;
         }
-        files.push(ProjectFile { path: p, rel, ws_rel, ws, is_project, is_entry, is_config, is_ignored, dev_entry: !user_entry && !tool && dev, tool_entry: !user_entry && (tool || dev || is_config) });
+        files.push(ProjectFile {
+            path: p,
+            rel,
+            ws,
+            is_project,
+            is_entry,
+            is_config,
+            is_ignored,
+            dev_entry: !user_entry && !tool && dev,
+            tool_entry: !user_entry && (tool || dev || is_config),
+        });
     }
     crate::perf("classify", t);
     Ok(Project { root: root.to_path_buf(), files, setups, all_rel })

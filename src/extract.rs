@@ -136,7 +136,6 @@ pub struct Export {
 #[derive(Debug, Clone)]
 pub struct ExportAll {
     pub import: usize,
-    pub is_type: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -144,7 +143,6 @@ pub struct FileFacts {
     pub imports: Vec<Import>,
     pub exports: Vec<Export>,
     pub export_alls: Vec<ExportAll>,
-    pub has_module_syntax: bool,
     pub is_cjs: bool,
     /// String literals (only collected for config files).
     pub strings: Vec<String>,
@@ -169,10 +167,7 @@ impl LineIndex {
 }
 
 pub fn source_type_for(path: &Path) -> Option<SourceType> {
-    match SourceType::from_path(path) {
-        Ok(st) => Some(st),
-        Err(_) => None,
-    }
+    SourceType::from_path(path).ok()
 }
 
 /// Single-file components (`.svelte`, `.vue`, `.astro`): extract `<script>` blocks (and astro frontmatter)
@@ -237,7 +232,7 @@ pub fn is_component_file(path: &Path) -> bool {
 /// Import specifiers of very large generated files (multi-megabyte `.d.ts`), found by scanning for
 /// `import`/`export ... from` statements and `import()`/`require()` calls instead of parsing.
 pub fn extract_scan(source: &str) -> FileFacts {
-    let mut facts = FileFacts { has_module_syntax: true, ..Default::default() };
+    let mut facts = FileFacts::default();
     let mut seen: FxHashSet<String> = FxHashSet::default();
     let bytes = source.as_bytes();
     let mut push = |spec: &str, kind: ImportKind, start: usize, facts: &mut FileFacts| {
@@ -299,11 +294,9 @@ pub fn extract_light(path: &Path, source: &str) -> FileFacts {
     }
     let Some(source_type) = source_type_for(path) else { return FileFacts::default() };
     let allocator = Allocator::default();
-    let ret = Parser::new(&allocator, source, source_type)
-        .with_options(ParseOptions { preserve_parens: false, ..ParseOptions::default() })
-        .parse();
+    let ret = Parser::new(&allocator, source, source_type).with_options(ParseOptions { preserve_parens: false, ..ParseOptions::default() }).parse();
     let lines = LineIndex::new(source);
-    let mut facts = FileFacts { has_module_syntax: ret.module_record.has_module_syntax, parse_error: ret.fatal_error, ..Default::default() };
+    let mut facts = FileFacts { parse_error: ret.fatal_error, ..Default::default() };
     let mr = &ret.module_record;
     let mut by_request: FxHashMap<String, usize> = FxHashMap::default();
     for (request, _) in mr.requested_modules.iter() {
@@ -336,7 +329,21 @@ pub fn extract_light(path: &Path, source: &str) -> FileFacts {
         let name = export_name_of(&entry.export_name);
         let start = entry.span.start;
         let (line, col) = lines.line_col(start);
-        facts.exports.push(Export { name, kind: ExportKind::Unknown, members: vec![], start, line, col, used_in_file: false, members_used_in_file: Members::All, reexport: None, tags: vec![], referenced_in: vec![], is_binding_element: false, symbol: None });
+        facts.exports.push(Export {
+            name,
+            kind: ExportKind::Unknown,
+            members: vec![],
+            start,
+            line,
+            col,
+            used_in_file: false,
+            members_used_in_file: Members::All,
+            reexport: None,
+            tags: vec![],
+            referenced_in: vec![],
+            is_binding_element: false,
+            symbol: None,
+        });
     }
     for entry in mr.indirect_export_entries.iter() {
         let Some(req) = &entry.module_request else { continue };
@@ -354,13 +361,27 @@ pub fn extract_light(path: &Path, source: &str) -> FileFacts {
         }
         let name = export_name_of(&entry.export_name);
         let (line, col) = lines.line_col(entry.span.start);
-        facts.exports.push(Export { name, kind: ExportKind::Unknown, members: vec![], start: entry.span.start, line, col, used_in_file: false, members_used_in_file: Members::All, reexport: Some((idx, imported)), tags: vec![], referenced_in: vec![], is_binding_element: false, symbol: None });
+        facts.exports.push(Export {
+            name,
+            kind: ExportKind::Unknown,
+            members: vec![],
+            start: entry.span.start,
+            line,
+            col,
+            used_in_file: false,
+            members_used_in_file: Members::All,
+            reexport: Some((idx, imported)),
+            tags: vec![],
+            referenced_in: vec![],
+            is_binding_element: false,
+            symbol: None,
+        });
     }
     for entry in mr.star_export_entries.iter() {
         let Some(req) = &entry.module_request else { continue };
         let spec = req.name.to_string();
         let idx = by_request[&spec];
-        facts.export_alls.push(ExportAll { import: idx, is_type: entry.is_type });
+        facts.export_alls.push(ExportAll { import: idx });
     }
     facts
 }
@@ -381,9 +402,7 @@ pub fn extract(path: &Path, source: &str, collect_strings: bool) -> FileFacts {
 
 fn extract_source(source: &str, source_type: SourceType, collect_strings: bool) -> FileFacts {
     let allocator = Allocator::default();
-    let ret = Parser::new(&allocator, source, source_type)
-        .with_options(ParseOptions { preserve_parens: false, ..ParseOptions::default() })
-        .parse();
+    let ret = Parser::new(&allocator, source, source_type).with_options(ParseOptions { preserve_parens: false, ..ParseOptions::default() }).parse();
     let program = ret.program;
     let semantic = SemanticBuilder::new().with_build_nodes(true).build(&program).semantic;
     let lines = LineIndex::new(source);
@@ -392,11 +411,7 @@ fn extract_source(source: &str, source_type: SourceType, collect_strings: bool) 
         source,
         lines: &lines,
         comments: &program.comments,
-        facts: FileFacts {
-            has_module_syntax: ret.module_record.has_module_syntax,
-            parse_error: ret.fatal_error,
-            ..Default::default()
-        },
+        facts: FileFacts { parse_error: ret.fatal_error, ..Default::default() },
         import_symbols: FxHashMap::default(),
         collect_strings,
     };
@@ -438,30 +453,24 @@ fn string_arg(e: &Expression) -> Option<String> {
 fn first_string_arg(args: &[Argument]) -> Option<String> {
     match args.first() {
         Some(Argument::StringLiteral(s)) => Some(s.value.to_string()),
-        Some(Argument::TemplateLiteral(t)) if t.expressions.is_empty() && t.quasis.len() == 1 => {
-            Some(t.quasis[0].value.raw.to_string())
-        }
+        Some(Argument::TemplateLiteral(t)) if t.expressions.is_empty() && t.quasis.len() == 1 => Some(t.quasis[0].value.raw.to_string()),
         _ => None,
     }
 }
 
 fn is_global_ident(sem: &Semantic, e: &Expression, name: &str) -> bool {
     match e {
-        Expression::Identifier(id) if id.name == name => {
-            match id.reference_id.get() {
-                Some(rid) => sem.scoping().get_reference(rid).symbol_id().is_none(),
-                None => true,
-            }
-        }
+        Expression::Identifier(id) if id.name == name => match id.reference_id.get() {
+            Some(rid) => sem.scoping().get_reference(rid).symbol_id().is_none(),
+            None => true,
+        },
         _ => false,
     }
 }
 
 fn is_import_meta_url(e: &Expression) -> bool {
     match e {
-        Expression::StaticMemberExpression(m) => {
-            m.property.name == "url" && matches!(&m.object, Expression::ImportMeta(_))
-        }
+        Expression::StaticMemberExpression(m) => m.property.name == "url" && matches!(&m.object, Expression::ImportMeta(_)),
         _ => false,
     }
 }
@@ -686,7 +695,21 @@ impl<'s, 'a> Extractor<'s, 'a> {
         tags: Vec<String>,
     ) {
         let (line, col) = self.lines.line_col(start);
-        self.facts.exports.push(Export { name, kind, members, start, line, col, used_in_file, members_used_in_file, reexport, tags, referenced_in: vec![], is_binding_element: false, symbol: None });
+        self.facts.exports.push(Export {
+            name,
+            kind,
+            members,
+            start,
+            line,
+            col,
+            used_in_file,
+            members_used_in_file,
+            reexport,
+            tags,
+            referenced_in: vec![],
+            is_binding_element: false,
+            symbol: None,
+        });
     }
 
     /// Attach the local symbol to the most recently pushed export.
@@ -821,9 +844,7 @@ impl<'s, 'a> Extractor<'s, 'a> {
     fn used_in_file(&self, sym: Option<SymbolId>) -> bool {
         let Some(sym) = sym else { return false };
         let nodes = self.sem.nodes();
-        self.sem.symbol_references(sym).any(|r| {
-            !matches!(nodes.parent_kind(r.node_id()), AstKind::ExportSpecifier(_) | AstKind::ExportDefaultDeclaration(_))
-        })
+        self.sem.symbol_references(sym).any(|r| !matches!(nodes.parent_kind(r.node_id()), AstKind::ExportSpecifier(_) | AstKind::ExportDefaultDeclaration(_)))
     }
 
     fn import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
@@ -1000,7 +1021,9 @@ impl<'s, 'a> Extractor<'s, 'a> {
                 let sym = c.id.as_ref().and_then(|i| i.symbol_id.get());
                 (ExportKind::Class, self.used_in_file(sym), class_members(c), self.member_usage(sym).1)
             }
-            ExportDefaultDeclarationKind::TSInterfaceDeclaration(t) => (ExportKind::Type, self.used_in_file(t.id.symbol_id.get()), vec![], Members::Named(vec![])),
+            ExportDefaultDeclarationKind::TSInterfaceDeclaration(t) => {
+                (ExportKind::Type, self.used_in_file(t.id.symbol_id.get()), vec![], Members::Named(vec![]))
+            }
             other => {
                 // `export default foo` where foo is an import binding → re-export
                 if let Some(e) = other.as_expression() {
@@ -1008,7 +1031,16 @@ impl<'s, 'a> Extractor<'s, 'a> {
                         let sym = id.reference_id.get().and_then(|rid| self.sem.scoping().get_reference(rid).symbol_id());
                         if let Some(sym) = sym {
                             if let Some((idx, imported)) = self.import_symbols.get(&sym).cloned() {
-                                self.push_export("default".into(), ExportKind::Unknown, vec![], decl.span.start, false, Members::Named(vec![]), Some((idx, imported)), tags);
+                                self.push_export(
+                                    "default".into(),
+                                    ExportKind::Unknown,
+                                    vec![],
+                                    decl.span.start,
+                                    false,
+                                    Members::Named(vec![]),
+                                    Some((idx, imported)),
+                                    tags,
+                                );
                                 return;
                             }
                             let (kind, members) = self.classify_symbol(sym);
@@ -1034,7 +1066,7 @@ impl<'s, 'a> Extractor<'s, 'a> {
                 let kind = if is_type { ExportKind::Type } else { ExportKind::Namespace };
                 self.push_export(export_name(name), kind, vec![], name.span().start, false, Members::Named(vec![]), Some((idx, "*".into())), tags);
             }
-            None => self.facts.export_alls.push(ExportAll { import: idx, is_type }),
+            None => self.facts.export_alls.push(ExportAll { import: idx }),
         }
     }
 
@@ -1045,7 +1077,11 @@ impl<'s, 'a> Extractor<'s, 'a> {
         // unwrap `await` and `(...)`
         loop {
             match nodes.kind(pid) {
-                AstKind::AwaitExpression(_) | AstKind::ParenthesizedExpression(_) | AstKind::TSAsExpression(_) | AstKind::TSNonNullExpression(_) | AstKind::TSSatisfiesExpression(_) => {
+                AstKind::AwaitExpression(_)
+                | AstKind::ParenthesizedExpression(_)
+                | AstKind::TSAsExpression(_)
+                | AstKind::TSNonNullExpression(_)
+                | AstKind::TSSatisfiesExpression(_) => {
                     pid = nodes.parent_id(pid);
                 }
                 _ => break,
@@ -1057,7 +1093,8 @@ impl<'s, 'a> Extractor<'s, 'a> {
             let index = arr.elements.iter().position(|el| el.as_expression().map(|e| e.span() == my_span).unwrap_or(false));
             let call_id = nodes.parent_id(pid);
             if let (Some(index), AstKind::CallExpression(call)) = (index, nodes.kind(call_id)) {
-                let is_promise_all = matches!(&call.callee, Expression::StaticMemberExpression(m) if m.property.name == "all" || m.property.name == "allSettled");
+                let is_promise_all =
+                    matches!(&call.callee, Expression::StaticMemberExpression(m) if m.property.name == "all" || m.property.name == "allSettled");
                 if is_promise_all {
                     let mut p2 = nodes.parent_id(call_id);
                     while matches!(nodes.kind(p2), AstKind::AwaitExpression(_) | AstKind::ParenthesizedExpression(_) | AstKind::TSAsExpression(_)) {
@@ -1108,17 +1145,15 @@ impl<'s, 'a> Extractor<'s, 'a> {
                                         let (_, members) = self.member_usage(b.symbol_id.get());
                                         return Names::Named(vec![ImportedName { name: "*".into(), is_type: false, members }]);
                                     }
-                                    BindingPattern::ObjectPattern(o) => {
-                                        if o.rest.is_none() {
-                                            let mut names = Vec::new();
-                                            for p in &o.properties {
-                                                match property_key_name(&p.key) {
-                                                    Some(k) => names.push(ImportedName { name: k, is_type: false, members: Members::All }),
-                                                    None => return Names::All,
-                                                }
+                                    BindingPattern::ObjectPattern(o) if o.rest.is_none() => {
+                                        let mut names = Vec::new();
+                                        for p in &o.properties {
+                                            match property_key_name(&p.key) {
+                                                Some(k) => names.push(ImportedName { name: k, is_type: false, members: Members::All }),
+                                                None => return Names::All,
                                             }
-                                            return Names::Named(names);
                                         }
+                                        return Names::Named(names);
                                     }
                                     _ => {}
                                 }
@@ -1164,7 +1199,6 @@ impl<'s, 'a> Extractor<'s, 'a> {
     }
 
     fn call_expression(&mut self, id: oxc_semantic::NodeId, call: &CallExpression<'a>) {
-        let sem = self.sem;
         match &call.callee {
             Expression::Identifier(callee) if callee.name == "require" => {
                 if let Some(spec) = first_string_arg(&call.arguments) {
@@ -1216,7 +1250,19 @@ impl<'s, 'a> Extractor<'s, 'a> {
                 } else if let Expression::Identifier(obj) = &m.object {
                     let obj_name = obj.name.as_str();
                     if (obj_name == "jest" || obj_name == "vi" || obj_name == "vitest")
-                        && matches!(prop, "mock" | "doMock" | "unmock" | "requireActual" | "requireMock" | "importActual" | "importMock" | "createMockFromModule" | "deepUnmock" | "setMock")
+                        && matches!(
+                            prop,
+                            "mock"
+                                | "doMock"
+                                | "unmock"
+                                | "requireActual"
+                                | "requireMock"
+                                | "importActual"
+                                | "importMock"
+                                | "createMockFromModule"
+                                | "deepUnmock"
+                                | "setMock"
+                        )
                     {
                         if let Some(spec) = first_string_arg(&call.arguments) {
                             self.push_import(spec, ImportKind::Mock, false, Names::All, call.span.start);
@@ -1284,8 +1330,12 @@ fn class_members(c: &Class) -> Vec<String> {
     let mut out = Vec::new();
     for el in &c.body.body {
         let (key, is_private) = match el {
-            ClassElement::MethodDefinition(m) => (&m.key, m.accessibility == Some(TSAccessibility::Private) || matches!(m.key, PropertyKey::PrivateIdentifier(_))),
-            ClassElement::PropertyDefinition(p) => (&p.key, p.accessibility == Some(TSAccessibility::Private) || matches!(p.key, PropertyKey::PrivateIdentifier(_))),
+            ClassElement::MethodDefinition(m) => {
+                (&m.key, m.accessibility == Some(TSAccessibility::Private) || matches!(m.key, PropertyKey::PrivateIdentifier(_)))
+            }
+            ClassElement::PropertyDefinition(p) => {
+                (&p.key, p.accessibility == Some(TSAccessibility::Private) || matches!(p.key, PropertyKey::PrivateIdentifier(_)))
+            }
             ClassElement::AccessorProperty(a) => (&a.key, matches!(a.key, PropertyKey::PrivateIdentifier(_))),
             _ => continue,
         };

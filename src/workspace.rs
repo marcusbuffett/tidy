@@ -1,7 +1,7 @@
 //! Workspace discovery and package.json parsing.
 
 use anyhow::{Context, Result};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 
@@ -31,9 +31,6 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    pub fn dep_kind(&self, name: &str) -> Option<DepKind> {
-        self.deps.iter().find(|(n, _, _)| n == name).map(|(_, k, _)| *k)
-    }
     pub fn has_dep(&self, name: &str) -> bool {
         self.deps.iter().any(|(n, _, _)| n == name)
     }
@@ -51,22 +48,14 @@ pub fn read_manifest(path: &Path) -> Result<Manifest> {
         None => return Ok(m),
     };
     m.name = obj.get("name").and_then(|v| v.as_str()).map(str::to_string);
-    let dep_sections: &[(&str, DepKind)] = &[
-        ("dependencies", DepKind::Prod),
-        ("devDependencies", DepKind::Dev),
-        ("peerDependencies", DepKind::Peer),
-        ("optionalDependencies", DepKind::Optional),
-    ];
+    let dep_sections: &[(&str, DepKind)] =
+        &[("dependencies", DepKind::Prod), ("devDependencies", DepKind::Dev), ("peerDependencies", DepKind::Peer), ("optionalDependencies", DepKind::Optional)];
     let peer_meta = obj.get("peerDependenciesMeta").and_then(|v| v.as_object());
     for (section, kind) in dep_sections {
         if let Some(Value::Object(deps)) = obj.get(*section) {
             for name in deps.keys() {
                 let kind = if *kind == DepKind::Peer
-                    && peer_meta
-                        .and_then(|pm| pm.get(name))
-                        .and_then(|v| v.get("optional"))
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
+                    && peer_meta.and_then(|pm| pm.get(name)).and_then(|v| v.get("optional")).and_then(|v| v.as_bool()).unwrap_or(false)
                 {
                     DepKind::OptionalPeer
                 } else {
@@ -199,7 +188,6 @@ pub struct Workspace {
     pub manifest: Manifest,
     /// Index of the parent workspace (the nearest enclosing one).
     pub parent: Option<usize>,
-    pub depth: usize,
 }
 
 impl Workspace {
@@ -269,7 +257,7 @@ pub fn discover(root: &Path) -> Result<Vec<Workspace>> {
     }
     dirs.sort();
     dirs.dedup();
-    let mut workspaces = vec![Workspace { dir: root.to_path_buf(), rel: ".".into(), manifest: root_manifest, parent: None, depth: 0 }];
+    let mut workspaces = vec![Workspace { dir: root.to_path_buf(), rel: ".".into(), manifest: root_manifest, parent: None }];
     for d in dirs {
         let manifest = match read_manifest(&d.join("package.json")) {
             Ok(m) => m,
@@ -279,18 +267,15 @@ pub fn discover(root: &Path) -> Result<Vec<Workspace>> {
             }
         };
         let rel = d.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
-        let depth = rel.split('/').count();
-        workspaces.push(Workspace { dir: d, rel, manifest, parent: None, depth });
+        workspaces.push(Workspace { dir: d, rel, manifest, parent: None });
     }
     // parents: nearest enclosing workspace
     let dirs: Vec<PathBuf> = workspaces.iter().map(|w| w.dir.clone()).collect();
     for i in 1..workspaces.len() {
         let mut best: Option<usize> = Some(0);
         for (j, d) in dirs.iter().enumerate() {
-            if j != i && workspaces[i].dir.starts_with(d) && d != root {
-                if best.map(|b| d.components().count() > dirs[b].components().count()).unwrap_or(true) {
-                    best = Some(j);
-                }
+            if j != i && workspaces[i].dir.starts_with(d) && d != root && best.map(|b| d.components().count() > dirs[b].components().count()).unwrap_or(true) {
+                best = Some(j);
             }
         }
         workspaces[i].parent = best;
@@ -344,17 +329,6 @@ fn expand_workspace_glob(root: &Path, glob: &str) -> Result<Vec<PathBuf>> {
 
 fn is_skipped_dir(p: &Path) -> bool {
     matches!(p.file_name().and_then(|n| n.to_str()), Some("node_modules" | ".git"))
-}
-
-/// Resolve `catalog:` style pseudo-ranges are irrelevant here; but expose workspace package names for alias detection.
-pub fn package_names(workspaces: &[Workspace]) -> FxHashMap<String, usize> {
-    let mut m = FxHashMap::default();
-    for (i, w) in workspaces.iter().enumerate() {
-        if let Some(n) = w.pkg_name() {
-            m.insert(n.to_string(), i);
-        }
-    }
-    m
 }
 
 #[allow(dead_code)]

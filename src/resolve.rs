@@ -148,7 +148,14 @@ impl Resolvers {
             ..ResolveOptions::default()
         };
         let base = Resolver::new(base_options.clone());
-        Resolvers { root: root.to_path_buf(), base_options, base, by_tsconfig: Mutex::default(), tsconfig_by_dir: Mutex::default(), workspace_packages: FxHashMap::default() }
+        Resolvers {
+            root: root.to_path_buf(),
+            base_options,
+            base,
+            by_tsconfig: Mutex::default(),
+            tsconfig_by_dir: Mutex::default(),
+            workspace_packages: FxHashMap::default(),
+        }
     }
 
     fn tsconfig_for_dir(&self, dir: &Path) -> Option<PathBuf> {
@@ -214,7 +221,13 @@ impl Resolvers {
         let tsconfig = self.tsconfig_for_dir(from_dir);
         let resolver = self.resolver_for(tsconfig.clone());
         let mut result = resolver.resolve(from_dir, specifier);
-        if matches!(result, Err(ResolveError::TsconfigNotFound(_) | ResolveError::TsconfigLoadFailed { .. } | ResolveError::TsconfigCircularExtend(_) | ResolveError::TsconfigSelfReference(_))) {
+        if matches!(
+            result,
+            Err(ResolveError::TsconfigNotFound(_)
+                | ResolveError::TsconfigLoadFailed { .. }
+                | ResolveError::TsconfigCircularExtend(_)
+                | ResolveError::TsconfigSelfReference(_))
+        ) {
             // Broken tsconfig (e.g. `extends` a package that is not installed): resolve without it.
             result = self.resolver_for(None).resolve(from_dir, specifier);
         }
@@ -252,7 +265,6 @@ impl Resolvers {
     }
 }
 
-
 fn is_build_output(p: &Path) -> bool {
     p.components().any(|c| matches!(c.as_os_str().to_str(), Some("dist" | "build" | "lib" | "out" | "esm" | "cjs" | ".output")))
 }
@@ -288,7 +300,12 @@ fn workspace_source(wp: &WorkspacePackage, subpath: &str) -> Option<PathBuf> {
     if key == "." {
         targets.extend(wp.entry_refs.iter().cloned());
     }
-    let is_src = |t: &str| t.rsplit('.').next().map(|e| matches!(e, "ts" | "tsx" | "mts" | "cts")).unwrap_or(false) && !t.contains("/dist/") && !t.starts_with("./dist") && !t.starts_with("dist");
+    let is_src = |t: &str| {
+        t.rsplit('.').next().map(|e| matches!(e, "ts" | "tsx" | "mts" | "cts")).unwrap_or(false)
+            && !t.contains("/dist/")
+            && !t.starts_with("./dist")
+            && !t.starts_with("dist")
+    };
     // 1. existing source targets
     for t in targets.iter().filter(|t| is_src(t)) {
         let p = wp.dir.join(t.trim_start_matches("./"));
@@ -312,7 +329,14 @@ fn workspace_source(wp: &WorkspacePackage, subpath: &str) -> Option<PathBuf> {
         }
     } else {
         let sub = subpath.trim_start_matches('/');
-        for c in [format!("src/{sub}.ts"), format!("src/{sub}.tsx"), format!("src/{sub}/index.ts"), format!("src/{sub}/index.tsx"), format!("{sub}.ts"), format!("{sub}/index.ts")] {
+        for c in [
+            format!("src/{sub}.ts"),
+            format!("src/{sub}.tsx"),
+            format!("src/{sub}/index.ts"),
+            format!("src/{sub}/index.tsx"),
+            format!("{sub}.ts"),
+            format!("{sub}/index.ts"),
+        ] {
             let p = wp.dir.join(c);
             if p.is_file() {
                 return Some(p);

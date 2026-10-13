@@ -1,3 +1,4 @@
+#![allow(clippy::type_complexity, clippy::collapsible_match, clippy::collapsible_if, clippy::needless_range_loop, clippy::while_let_loop)]
 mod analysis;
 
 /// Fine-grained phase timings (name, ms) collected across modules when `--perf` is used.
@@ -106,7 +107,11 @@ fn main() -> Result<()> {
     let issues_ms = t_issues.elapsed().as_secs_f64() * 1000.0;
 
     // Filter issue types: CLI include/exclude override config include/exclude override defaults.
-    let include: Vec<IssueKind> = if !cli.include.is_empty() { cli.include.iter().filter_map(|s| IssueKind::parse(s)).collect() } else { cfg.include.iter().filter_map(|s| IssueKind::parse(s)).collect() };
+    let include: Vec<IssueKind> = if !cli.include.is_empty() {
+        cli.include.iter().filter_map(|s| IssueKind::parse(s)).collect()
+    } else {
+        cfg.include.iter().filter_map(|s| IssueKind::parse(s)).collect()
+    };
     let rules_off = cfg.rules_off();
     let exclude: Vec<IssueKind> = cli.exclude.iter().chain(cfg.exclude.iter()).chain(rules_off.iter()).filter_map(|s| IssueKind::parse(s)).collect();
     issues.retain(|i| {
@@ -159,29 +164,60 @@ fn explain(root: &std::path::Path, project: &project::Project, graph: &graph::Gr
     let path = root.join(target.trim_start_matches("./"));
     let Some(&mi) = graph.by_path.get(&path) else {
         if let Some(f) = project.files.iter().find(|f| f.rel == target) {
-            println!("{}: in project list but not in graph (ws={} project={} entry={} config={} ignored={})", target, f.ws, f.is_project, f.is_entry, f.is_config, f.is_ignored);
+            println!(
+                "{}: in project list but not in graph (ws={} project={} entry={} config={} ignored={})",
+                target, f.ws, f.is_project, f.is_entry, f.is_config, f.is_ignored
+            );
         } else {
             println!("{target}: not a project/entry/config file (not walked, gitignored, or no pattern matched)");
             let ws = workspaces.iter().enumerate().rev().find(|(_, w)| path.starts_with(&w.dir)).map(|(i, _)| i).unwrap_or(0);
             let s = &project.setups[ws];
             let ws_rel = path.strip_prefix(&workspaces[ws].dir).unwrap_or(&path).to_string_lossy().replace('\\', "/");
             println!("  workspace #{ws} ({}) ws_rel={ws_rel}", workspaces[ws].rel);
-            println!("  project={} entry={} dev_entry={} config={} ignore={} exact_entry={}", s.project.is_match(&ws_rel), s.entry.is_match(&ws_rel), s.dev_entry.is_match(&ws_rel), s.config.is_match(&ws_rel), s.ignore.is_match(&ws_rel), s.exact_entries.contains(&ws_rel));
+            println!(
+                "  project={} entry={} dev_entry={} config={} ignore={} exact_entry={}",
+                s.project.is_match(&ws_rel),
+                s.entry.is_match(&ws_rel),
+                s.dev_entry.is_match(&ws_rel),
+                s.config.is_match(&ws_rel),
+                s.ignore.is_match(&ws_rel),
+                s.exact_entries.contains(&ws_rel)
+            );
         }
         return;
     };
     let m = &graph.modules[mi];
     println!("{} (module #{mi})", m.rel);
-    println!("  workspace #{} ({})  project={} entry={} dev_entry={} config={} ignored={} reachable={} cjs={} parse_error={}", m.ws, workspaces[m.ws].rel, m.is_project, m.is_entry, m.dev_entry, m.is_config, m.is_ignored, m.reachable, m.facts.is_cjs, m.facts.parse_error);
+    println!(
+        "  workspace #{} ({})  project={} entry={} dev_entry={} config={} ignored={} reachable={} cjs={} parse_error={}",
+        m.ws, workspaces[m.ws].rel, m.is_project, m.is_entry, m.dev_entry, m.is_config, m.is_ignored, m.reachable, m.facts.is_cjs, m.facts.parse_error
+    );
     println!("  enabled tools: {}", project.setups[m.ws].enabled_tools.iter().map(|&t| patterns::TOOLS[t].name).collect::<Vec<_>>().join(", "));
     println!("  imports:");
     for (ii, imp) in m.facts.imports.iter().enumerate() {
-        let targets: Vec<String> = m.edges.iter().filter(|(i, _)| *i == ii).map(|(_, r)| format!("{:?} pkg={:?}", r.target, r.package)).collect();
+        let targets: Vec<String> = m
+            .edges
+            .iter()
+            .filter(|(i, _)| *i == ii)
+            .map(|(_, r)| {
+                let t = match &r.target {
+                    resolve::Target::Internal(p) => format!("internal {}", p.display()),
+                    resolve::Target::External(p) => format!("external {}", p.display()),
+                    resolve::Target::Builtin => "builtin".to_string(),
+                    resolve::Target::Unresolved(err) => format!("unresolved ({err})"),
+                    resolve::Target::Ignored => "ignored".to_string(),
+                };
+                format!("{t} pkg={:?}", r.package)
+            })
+            .collect();
         println!("    {:?} {} {:?} -> {}", imp.kind, imp.specifier, imp.names, targets.join(" | "));
     }
     println!("  exports:");
     for (i, e) in m.facts.exports.iter().enumerate() {
-        println!("    {} {:?} members={:?} used_in_file={} reexport={:?} tags={:?} referenced_in={:?} -> used={:?}", e.name, e.kind, e.members, e.used_in_file, e.reexport, e.tags, e.referenced_in, m.export_used[i]);
+        println!(
+            "    {} {:?} members={:?} used_in_file={} reexport={:?} tags={:?} referenced_in={:?} -> used={:?}",
+            e.name, e.kind, e.members, e.used_in_file, e.reexport, e.tags, e.referenced_in, m.export_used[i]
+        );
     }
     for ea in &m.facts.export_alls {
         println!("    export * from {}", m.facts.imports[ea.import].specifier);

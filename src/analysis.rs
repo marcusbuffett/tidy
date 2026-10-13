@@ -54,7 +54,15 @@ pub fn analyze(project: &Project, graph: &Graph, setups: &[WorkspaceSetup], opts
                 if m.rel.ends_with(".d.ts") || m.rel.ends_with(".d.mts") || m.rel.ends_with(".d.cts") {
                     continue;
                 }
-                issues.push(Issue { kind: IssueKind::Unresolved, file: m.rel.clone(), name: imp.specifier.clone(), parent: None, line: imp.line, col: imp.col, pos: imp.start });
+                issues.push(Issue {
+                    kind: IssueKind::Unresolved,
+                    file: m.rel.clone(),
+                    name: imp.specifier.clone(),
+                    parent: None,
+                    line: imp.line,
+                    col: imp.col,
+                    pos: imp.start,
+                });
             }
         }
         if !m.is_project {
@@ -94,7 +102,9 @@ pub fn analyze(project: &Project, graph: &Graph, setups: &[WorkspaceSetup], opts
                         continue;
                     }
                     let ieuf = &setup.ignore_exports_used_in_file;
-                    if e.used_in_file && (e.is_binding_element || ieuf.applies(if e.kind == ExportKind::Type { "types" } else { "exports" }) || ieuf.applies(kind_key)) {
+                    if e.used_in_file
+                        && (e.is_binding_element || ieuf.applies(if e.kind == ExportKind::Type { "types" } else { "exports" }) || ieuf.applies(kind_key))
+                    {
                         continue;
                     }
                     let kind = if matches!(e.kind, ExportKind::Type | ExportKind::Enum) { IssueKind::Types } else { IssueKind::Exports };
@@ -114,7 +124,15 @@ pub fn analyze(project: &Project, graph: &Graph, setups: &[WorkspaceSetup], opts
                         if members.contains(mem) || e.members_used_in_file.contains(mem) {
                             continue;
                         }
-                        issues.push(Issue { kind, file: m.rel.clone(), name: mem.clone(), parent: Some(e.name.clone()), line: e.line, col: e.col, pos: e.start });
+                        issues.push(Issue {
+                            kind,
+                            file: m.rel.clone(),
+                            name: mem.clone(),
+                            parent: Some(e.name.clone()),
+                            line: e.line,
+                            col: e.col,
+                            pos: e.start,
+                        });
                     }
                 }
             }

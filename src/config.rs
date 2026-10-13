@@ -182,12 +182,8 @@ impl NameMatcher {
             // Approximate JS regex via glob when it is a simple prefix/suffix pattern; else exact.
             let simple = inner.trim_start_matches('^').trim_end_matches('$');
             if !simple.chars().any(|c| "[]()|+?\\{}".contains(c)) {
-                let pat = format!(
-                    "{}{}{}",
-                    if inner.starts_with('^') { "" } else { "*" },
-                    simple.replace(".*", "*"),
-                    if inner.ends_with('$') { "" } else { "*" }
-                );
+                let pat =
+                    format!("{}{}{}", if inner.starts_with('^') { "" } else { "*" }, simple.replace(".*", "*"), if inner.ends_with('$') { "" } else { "*" });
                 if let Ok(g) = globset::Glob::new(&pat) {
                     return NameMatcher::Glob(g.compile_matcher());
                 }

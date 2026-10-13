@@ -193,7 +193,8 @@ pub fn build(project: &Project, resolvers: &Resolvers, workspaces_dirs: &[PathBu
             .into_par_iter()
             .map(|p| {
                 let t = std::time::Instant::now();
-                let facts = if is_code(&p) { std::fs::read_to_string(&p).map(|s| extract::extract_light(&p, &s)).unwrap_or_default() } else { FileFacts::default() };
+                let facts =
+                    if is_code(&p) { std::fs::read_to_string(&p).map(|s| extract::extract_light(&p, &s)).unwrap_or_default() } else { FileFacts::default() };
                 let ms = t.elapsed().as_secs_f64() * 1000.0;
                 if ms > 3.0 && std::env::var_os("TIDY_DEBUG_PARSE").is_some() {
                     eprintln!("slow parse {ms:.1}ms {} ({} bytes)", p.display(), std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0));
@@ -277,17 +278,39 @@ fn add_config_refs(facts: &mut FileFacts) {
             if !keyed || s.starts_with('!') {
                 continue;
             }
-            facts.imports.push(extract::Import { specifier: s, kind: ImportKind::Glob, is_type: false, names: Names::Named(vec![]), start: 0, line: 0, col: 0 });
+            facts.imports.push(extract::Import {
+                specifier: s,
+                kind: ImportKind::Glob,
+                is_type: false,
+                names: Names::Named(vec![]),
+                start: 0,
+                line: 0,
+                col: 0,
+            });
             continue;
         }
         let relative = s.starts_with("./") || s.starts_with("../");
         // bare file names like `test-setup.ts` or `src/setup.ts` are resolved relative to the config file
-        let looks_like_file = !relative && !s.starts_with('/') && !s.starts_with('@') && !s.starts_with('#') && !s.contains(':') && is_source_ext(&s) && !s.starts_with("node_modules");
+        let looks_like_file = !relative
+            && !s.starts_with('/')
+            && !s.starts_with('@')
+            && !s.starts_with('#')
+            && !s.contains(':')
+            && is_source_ext(&s)
+            && !s.starts_with("node_modules");
         if !relative && !looks_like_file {
             continue;
         }
         let spec = if relative { s } else { format!("./{s}") };
-        facts.imports.push(extract::Import { specifier: spec, kind: ImportKind::ConfigRef, is_type: false, names: Names::Named(vec![]), start: 0, line: 0, col: 0 });
+        facts.imports.push(extract::Import {
+            specifier: spec,
+            kind: ImportKind::ConfigRef,
+            is_type: false,
+            names: Names::Named(vec![]),
+            start: 0,
+            line: 0,
+            col: 0,
+        });
     }
 }
 
@@ -368,7 +391,13 @@ impl Graph {
     }
 
     /// Where `name` exported from module `t` is actually defined, following `export * from` chains.
-    fn find_export(&self, t: usize, name: &str, memo: &mut FxHashMap<(usize, String), Option<(usize, usize)>>, visiting: &mut FxHashSet<usize>) -> Option<(usize, usize)> {
+    fn find_export(
+        &self,
+        t: usize,
+        name: &str,
+        memo: &mut FxHashMap<(usize, String), Option<(usize, usize)>>,
+        visiting: &mut FxHashSet<usize>,
+    ) -> Option<(usize, usize)> {
         if let Some(i) = self.modules[t].facts.exports.iter().position(|e| e.name == name) {
             return Some((t, i));
         }
@@ -413,10 +442,15 @@ impl Graph {
             let edges: Vec<(usize, Option<usize>)> = self.modules[m]
                 .edges
                 .iter()
-                .map(|(ii, r)| (*ii, match &r.target {
-                    Target::Internal(p) => self.by_path.get(p).copied(),
-                    _ => None,
-                }))
+                .map(|(ii, r)| {
+                    (
+                        *ii,
+                        match &r.target {
+                            Target::Internal(p) => self.by_path.get(p).copied(),
+                            _ => None,
+                        },
+                    )
+                })
                 .collect();
             for (ii, target) in edges {
                 let Some(t) = target else { continue };
@@ -442,13 +476,7 @@ impl Graph {
                 }
             }
         }
-            self.memo = visiting;
-    }
-
-    fn mark_all(&mut self, t: usize, all_marked: &mut Vec<bool>) {
-        let mut memo = std::mem::take(&mut self.memo);
-        self.mark_all_inner(t, all_marked, &mut memo);
-        self.memo = memo;
+        self.memo = visiting;
     }
 
     fn mark_all_inner(&mut self, t: usize, all_marked: &mut Vec<bool>, memo: &mut FxHashMap<(usize, String), Option<(usize, usize)>>) {
@@ -478,7 +506,14 @@ impl Graph {
         }
     }
 
-    fn demand(&mut self, t: usize, name: &str, members: &Members, all_marked: &mut Vec<bool>, visiting: &mut FxHashMap<(usize, String), Option<(usize, usize)>>) {
+    fn demand(
+        &mut self,
+        t: usize,
+        name: &str,
+        members: &Members,
+        all_marked: &mut Vec<bool>,
+        visiting: &mut FxHashMap<(usize, String), Option<(usize, usize)>>,
+    ) {
         let mut guard = FxHashSet::default();
         let Some((t, i)) = self.find_export(t, name, visiting, &mut guard) else { return };
         {

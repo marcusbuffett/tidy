@@ -81,9 +81,7 @@ pub fn json(issues: &[Issue]) -> String {
 
 /// Compact machine-friendly JSON: a flat list of issues.
 pub fn json_flat(issues: &[Issue]) -> String {
-    let list: Vec<Value> = issues
-        .iter()
-        .map(|i| json!({ "type": i.kind.key(), "file": i.file, "name": display_name(i), "line": i.line, "col": i.col }))
-        .collect();
+    let list: Vec<Value> =
+        issues.iter().map(|i| json!({ "type": i.kind.key(), "file": i.file, "name": display_name(i), "line": i.line, "col": i.col })).collect();
     serde_json::to_string(&list).unwrap()
 }

@@ -12,42 +12,214 @@ use std::path::Path;
 const IGNORED_DEPENDENCIES: &[&str] = &["knip", "typescript", "tidy", "bun", "@types/bun", "bun-types"];
 
 const PLUGIN_PREFIXES: &[&str] = &[
-    "eslint-config-", "eslint-plugin-", "@babel/preset-", "@babel/plugin-", "babel-preset-", "babel-plugin-", "postcss-", "prettier-plugin-",
-    "vite-plugin-", "rollup-plugin-", "stylelint-config-", "stylelint-plugin-", "remark-", "rehype-", "@eslint/", "@storybook/", "tailwindcss-",
-    "expo-", "metro-", "@expo/", "@tailwindcss/", "@vitest/", "@commitlint/config-", "commitlint-config-", "semantic-release-", "@semantic-release/",
-    "release-it-", "@release-it/", "lint-staged-", "gatsby-plugin-", "gatsby-theme-", "@nuxt/", "nuxt-", "@nuxtjs/", "@astrojs/", "@sveltejs/",
-    "@docusaurus/", "docusaurus-", "@graphql-codegen/", "webpack-", "@rollup/plugin-", "@vitejs/plugin-", "vitest-", "jest-", "karma-", "mocha-",
-    "@cspell/", "cspell-", "markdownlint-", "@react-native/", "react-native-", "@react-native-community/", "unplugin-", "@unocss/", "unocss-",
+    "eslint-config-",
+    "eslint-plugin-",
+    "@babel/preset-",
+    "@babel/plugin-",
+    "babel-preset-",
+    "babel-plugin-",
+    "postcss-",
+    "prettier-plugin-",
+    "vite-plugin-",
+    "rollup-plugin-",
+    "stylelint-config-",
+    "stylelint-plugin-",
+    "remark-",
+    "rehype-",
+    "@eslint/",
+    "@storybook/",
+    "tailwindcss-",
+    "expo-",
+    "metro-",
+    "@expo/",
+    "@tailwindcss/",
+    "@vitest/",
+    "@commitlint/config-",
+    "commitlint-config-",
+    "semantic-release-",
+    "@semantic-release/",
+    "release-it-",
+    "@release-it/",
+    "lint-staged-",
+    "gatsby-plugin-",
+    "gatsby-theme-",
+    "@nuxt/",
+    "nuxt-",
+    "@nuxtjs/",
+    "@astrojs/",
+    "@sveltejs/",
+    "@docusaurus/",
+    "docusaurus-",
+    "@graphql-codegen/",
+    "webpack-",
+    "@rollup/plugin-",
+    "@vitejs/plugin-",
+    "vitest-",
+    "jest-",
+    "karma-",
+    "mocha-",
+    "@cspell/",
+    "cspell-",
+    "markdownlint-",
+    "@react-native/",
+    "react-native-",
+    "@react-native-community/",
+    "unplugin-",
+    "@unocss/",
+    "unocss-",
 ];
 
 const KNOWN_BINARIES: &[(&str, &str)] = &[
-    ("tsc", "typescript"), ("tsserver", "typescript"), ("playwright", "@playwright/test"), ("biome", "@biomejs/biome"), ("dotenv", "dotenv-cli"),
-    ("sentry-cli", "@sentry/cli"), ("eas", "eas-cli"), ("changeset", "@changesets/cli"), ("commitlint", "@commitlint/cli"), ("run-s", "npm-run-all"),
-    ("run-p", "npm-run-all"), ("graphql-codegen", "@graphql-codegen/cli"), ("gql-gen", "@graphql-codegen/cli"), ("svgr", "@svgr/cli"),
-    ("postcss", "postcss-cli"), ("swc", "@swc/cli"), ("babel", "@babel/cli"), ("cap", "@capacitor/cli"), ("netlify", "netlify-cli"),
-    ("firebase", "firebase-tools"), ("cdk", "aws-cdk"), ("ncc", "@vercel/ncc"), ("tauri", "@tauri-apps/cli"), ("ionic", "@ionic/cli"), ("ng", "@angular/cli"),
-    ("nest", "@nestjs/cli"), ("remix", "@remix-run/dev"), ("react-router", "@react-router/dev"), ("svelte-kit", "@sveltejs/kit"), ("docusaurus", "@docusaurus/core"),
-    ("eleventy", "@11ty/eleventy"), ("webpack", "webpack-cli"), ("storybook", "storybook"), ("sb", "storybook"), ("rnv", "rnv"), ("pod-install", "pod-install"),
-    ("ts-node", "ts-node"), ("tsx", "tsx"), ("nuxi", "nuxi"), ("nuxt", "nuxt"), ("expo-cli", "expo-cli"), ("drizzle-kit", "drizzle-kit"),
-    ("stryker", "@stryker-mutator/core"), ("c8", "c8"), ("nyc", "nyc"), ("tap", "tap"), ("size-limit", "size-limit"), ("madge", "madge"),
-    ("typedoc", "typedoc"), ("vue-tsc", "vue-tsc"), ("svelte-check", "svelte-check"), ("rslib", "@rslib/core"), ("rsbuild", "@rsbuild/core"),
-    ("rspack", "@rspack/cli"), ("oxlint", "oxlint"), ("oxfmt", "oxfmt"), ("relay-compiler", "relay-compiler"), ("wxt", "wxt"), ("prisma", "prisma"),
-    ("vitest", "vitest"), ("jest", "jest"), ("eslint", "eslint"), ("prettier", "prettier"), ("next", "next"), ("expo", "expo"), ("turbo", "turbo"),
-    ("vite", "vite"), ("tsup", "tsup"), ("tsdown", "tsdown"), ("rollup", "rollup"), ("cypress", "cypress"), ("knip", "knip"), ("husky", "husky"),
-    ("lint-staged", "lint-staged"), ("cross-env", "cross-env"), ("rimraf", "rimraf"), ("shx", "shx"), ("nx", "nx"), ("lerna", "lerna"), ("concurrently", "concurrently"),
-    ("wrangler", "wrangler"), ("nodemon", "nodemon"), ("esbuild", "esbuild"), ("sass", "sass"), ("tailwindcss", "tailwindcss"), ("mocha", "mocha"), ("ava", "ava"),
-    ("wait-on", "wait-on"), ("serve", "serve"), ("http-server", "http-server"), ("msw", "msw"), ("patch-package", "patch-package"), ("release-it", "release-it"),
-    ("semantic-release", "semantic-release"), ("vercel", "vercel"), ("supabase", "supabase"), ("convex", "convex"), ("sst", "sst"), ("serverless", "serverless"),
-    ("zx", "zx"), ("electron", "electron"), ("electron-builder", "electron-builder"), ("electron-vite", "electron-vite"), ("astro", "astro"), ("gatsby", "gatsby"),
-    ("hardhat", "hardhat"), ("react-native", "react-native"), ("npm-run-all", "npm-run-all"), ("npm-run-all2", "npm-run-all2"), ("tsc-alias", "tsc-alias"),
-    ("tsc-watch", "tsc-watch"), ("vitepress", "vitepress"), ("unbuild", "unbuild"), ("changelogen", "changelogen"), ("bumpp", "bumpp"), ("syncpack", "syncpack"),
-    ("depcheck", "depcheck"), ("cspell", "cspell"), ("markdownlint", "markdownlint-cli"), ("markdownlint-cli2", "markdownlint-cli2"), ("stylelint", "stylelint"),
-    ("sort-package-json", "sort-package-json"), ("standard-version", "standard-version"), ("i18next", "i18next-parser"), ("plop", "plop"),
-    ("json-server", "json-server"), ("gh-pages", "gh-pages"), ("open-cli", "open-cli"), ("wsrun", "wsrun"), ("ultra", "ultra-runner"), ("ts-patch", "ts-patch"),
-    ("tsp", "ts-patch"), ("tsd", "tsd"), ("expect-type", "expect-type"), ("ncu", "npm-check-updates"), ("npm-check-updates", "npm-check-updates"),
-    ("taze", "taze"), ("lefthook", "lefthook"), ("simple-git-hooks", "simple-git-hooks"), ("codegen", "@graphql-codegen/cli"), ("graphql-inspector", "@graphql-inspector/cli"),
-    ("oclif", "oclif"), ("pkgroll", "pkgroll"), ("bunchee", "bunchee"), ("dts-bundle-generator", "dts-bundle-generator"), ("api-extractor", "@microsoft/api-extractor"),
-    ("sort-imports", "sort-imports"), ("organize-imports-cli", "organize-imports-cli"), ("ts-unused-exports", "ts-unused-exports"), ("ts-prune", "ts-prune"),
+    ("tsc", "typescript"),
+    ("tsserver", "typescript"),
+    ("playwright", "@playwright/test"),
+    ("biome", "@biomejs/biome"),
+    ("dotenv", "dotenv-cli"),
+    ("sentry-cli", "@sentry/cli"),
+    ("eas", "eas-cli"),
+    ("changeset", "@changesets/cli"),
+    ("commitlint", "@commitlint/cli"),
+    ("run-s", "npm-run-all"),
+    ("run-p", "npm-run-all"),
+    ("graphql-codegen", "@graphql-codegen/cli"),
+    ("gql-gen", "@graphql-codegen/cli"),
+    ("svgr", "@svgr/cli"),
+    ("postcss", "postcss-cli"),
+    ("swc", "@swc/cli"),
+    ("babel", "@babel/cli"),
+    ("cap", "@capacitor/cli"),
+    ("netlify", "netlify-cli"),
+    ("firebase", "firebase-tools"),
+    ("cdk", "aws-cdk"),
+    ("ncc", "@vercel/ncc"),
+    ("tauri", "@tauri-apps/cli"),
+    ("ionic", "@ionic/cli"),
+    ("ng", "@angular/cli"),
+    ("nest", "@nestjs/cli"),
+    ("remix", "@remix-run/dev"),
+    ("react-router", "@react-router/dev"),
+    ("svelte-kit", "@sveltejs/kit"),
+    ("docusaurus", "@docusaurus/core"),
+    ("eleventy", "@11ty/eleventy"),
+    ("webpack", "webpack-cli"),
+    ("storybook", "storybook"),
+    ("sb", "storybook"),
+    ("rnv", "rnv"),
+    ("pod-install", "pod-install"),
+    ("ts-node", "ts-node"),
+    ("tsx", "tsx"),
+    ("nuxi", "nuxi"),
+    ("nuxt", "nuxt"),
+    ("expo-cli", "expo-cli"),
+    ("drizzle-kit", "drizzle-kit"),
+    ("stryker", "@stryker-mutator/core"),
+    ("c8", "c8"),
+    ("nyc", "nyc"),
+    ("tap", "tap"),
+    ("size-limit", "size-limit"),
+    ("madge", "madge"),
+    ("typedoc", "typedoc"),
+    ("vue-tsc", "vue-tsc"),
+    ("svelte-check", "svelte-check"),
+    ("rslib", "@rslib/core"),
+    ("rsbuild", "@rsbuild/core"),
+    ("rspack", "@rspack/cli"),
+    ("oxlint", "oxlint"),
+    ("oxfmt", "oxfmt"),
+    ("relay-compiler", "relay-compiler"),
+    ("wxt", "wxt"),
+    ("prisma", "prisma"),
+    ("vitest", "vitest"),
+    ("jest", "jest"),
+    ("eslint", "eslint"),
+    ("prettier", "prettier"),
+    ("next", "next"),
+    ("expo", "expo"),
+    ("turbo", "turbo"),
+    ("vite", "vite"),
+    ("tsup", "tsup"),
+    ("tsdown", "tsdown"),
+    ("rollup", "rollup"),
+    ("cypress", "cypress"),
+    ("knip", "knip"),
+    ("husky", "husky"),
+    ("lint-staged", "lint-staged"),
+    ("cross-env", "cross-env"),
+    ("rimraf", "rimraf"),
+    ("shx", "shx"),
+    ("nx", "nx"),
+    ("lerna", "lerna"),
+    ("concurrently", "concurrently"),
+    ("wrangler", "wrangler"),
+    ("nodemon", "nodemon"),
+    ("esbuild", "esbuild"),
+    ("sass", "sass"),
+    ("tailwindcss", "tailwindcss"),
+    ("mocha", "mocha"),
+    ("ava", "ava"),
+    ("wait-on", "wait-on"),
+    ("serve", "serve"),
+    ("http-server", "http-server"),
+    ("msw", "msw"),
+    ("patch-package", "patch-package"),
+    ("release-it", "release-it"),
+    ("semantic-release", "semantic-release"),
+    ("vercel", "vercel"),
+    ("supabase", "supabase"),
+    ("convex", "convex"),
+    ("sst", "sst"),
+    ("serverless", "serverless"),
+    ("zx", "zx"),
+    ("electron", "electron"),
+    ("electron-builder", "electron-builder"),
+    ("electron-vite", "electron-vite"),
+    ("astro", "astro"),
+    ("gatsby", "gatsby"),
+    ("hardhat", "hardhat"),
+    ("react-native", "react-native"),
+    ("npm-run-all", "npm-run-all"),
+    ("npm-run-all2", "npm-run-all2"),
+    ("tsc-alias", "tsc-alias"),
+    ("tsc-watch", "tsc-watch"),
+    ("vitepress", "vitepress"),
+    ("unbuild", "unbuild"),
+    ("changelogen", "changelogen"),
+    ("bumpp", "bumpp"),
+    ("syncpack", "syncpack"),
+    ("depcheck", "depcheck"),
+    ("cspell", "cspell"),
+    ("markdownlint", "markdownlint-cli"),
+    ("markdownlint-cli2", "markdownlint-cli2"),
+    ("stylelint", "stylelint"),
+    ("sort-package-json", "sort-package-json"),
+    ("standard-version", "standard-version"),
+    ("i18next", "i18next-parser"),
+    ("plop", "plop"),
+    ("json-server", "json-server"),
+    ("gh-pages", "gh-pages"),
+    ("open-cli", "open-cli"),
+    ("wsrun", "wsrun"),
+    ("ultra", "ultra-runner"),
+    ("ts-patch", "ts-patch"),
+    ("tsp", "ts-patch"),
+    ("tsd", "tsd"),
+    ("expect-type", "expect-type"),
+    ("ncu", "npm-check-updates"),
+    ("npm-check-updates", "npm-check-updates"),
+    ("taze", "taze"),
+    ("lefthook", "lefthook"),
+    ("simple-git-hooks", "simple-git-hooks"),
+    ("codegen", "@graphql-codegen/cli"),
+    ("graphql-inspector", "@graphql-inspector/cli"),
+    ("oclif", "oclif"),
+    ("pkgroll", "pkgroll"),
+    ("bunchee", "bunchee"),
+    ("dts-bundle-generator", "dts-bundle-generator"),
+    ("api-extractor", "@microsoft/api-extractor"),
+    ("sort-imports", "sort-imports"),
+    ("organize-imports-cli", "organize-imports-cli"),
+    ("ts-unused-exports", "ts-unused-exports"),
+    ("ts-prune", "ts-prune"),
 ];
 
 /// Minimal view of an installed package's manifest.
@@ -185,36 +357,6 @@ fn line_col(text: &str, pos: usize) -> (u32, u32) {
     let line = text[..pos].matches('\n').count() as u32 + 1;
     let col = pos - text[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
     (line, col as u32 + 1)
-}
-
-fn string_refers_to(s: &str, dep: &str) -> bool {
-    if s == dep {
-        return true;
-    }
-    if s.len() > dep.len() && s.starts_with(dep) && s.as_bytes()[dep.len()] == b'/' {
-        return true;
-    }
-    if dep.starts_with("@types/") {
-        return false;
-    }
-    for p in PLUGIN_PREFIXES {
-        if let Some(rest) = dep.strip_prefix(p) {
-            if rest == s {
-                return true;
-            }
-        }
-    }
-    // `@scope` → `@scope/eslint-config`, `@scope/foo` → `@scope/eslint-config-foo`
-    if let Some(scope) = s.strip_prefix('@') {
-        let (scope, name) = scope.split_once('/').unwrap_or((scope, ""));
-        for base in ["eslint-config", "prettier-config", "stylelint-config", "commitlint-config", "tsconfig", "babel-preset", "eslint-plugin"] {
-            let cand = if name.is_empty() { format!("@{scope}/{base}") } else { format!("@{scope}/{base}-{name}") };
-            if cand == dep {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setups: &[WorkspaceSetup]) -> Vec<Issue> {
@@ -360,8 +502,7 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
                     continue;
                 }
                 let base = dep.strip_prefix("@types/").map(|b| b.replace("__", "/"));
-                let hit = refers(&dep)
-                    || base.as_deref().map(|b| refers(b) || (!b.contains('/') && index.contains(&format!("@{b}")))).unwrap_or(false);
+                let hit = refers(&dep) || base.as_deref().map(|b| refers(b) || (!b.contains('/') && index.contains(&format!("@{b}")))).unwrap_or(false);
                 if hit {
                     referenced[c].insert(dep);
                 }
@@ -430,7 +571,8 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
             }
         }
         // Tool-implied dependencies (platform packages, test runners pulled in by addons...).
-        let strings: FxHashSet<String> = modules_by_ws[ws].iter().map(|&mi| &graph.modules[mi]).filter(|m| m.is_config).flat_map(|m| m.facts.strings.iter().cloned()).collect();
+        let strings: FxHashSet<String> =
+            modules_by_ws[ws].iter().map(|&mi| &graph.modules[mi]).filter(|m| m.is_config).flat_map(|m| m.facts.strings.iter().cloned()).collect();
         for &ti in &setup.enabled_tools {
             match crate::patterns::TOOLS[ti].name {
                 "capacitor" => {
@@ -445,10 +587,8 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
                         packages.extend(workspaces[c].manifest.dep_names().filter(|d| d.starts_with("@size-limit/")).map(String::from));
                     }
                 }
-                "storybook" => {
-                    if strings.iter().any(|s| s == "@storybook/addon-vitest" || s == "@storybook/experimental-addon-test") {
-                        packages.extend(["vitest", "@vitest/browser", "@vitest/coverage-v8", "playwright"].map(String::from));
-                    }
+                "storybook" if strings.iter().any(|s| s == "@storybook/addon-vitest" || s == "@storybook/experimental-addon-test") => {
+                    packages.extend(["vitest", "@vitest/browser", "@vitest/coverage-v8", "playwright"].map(String::from));
                 }
                 _ => {}
             }
@@ -549,7 +689,14 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
                 }
             }
         }
-        fn is_referenced(name: &str, ws: usize, chains: &[Vec<usize>], referenced: &[FxHashSet<String>], hosts: &FxHashMap<String, Vec<String>>, seen: &mut FxHashSet<String>) -> bool {
+        fn is_referenced(
+            name: &str,
+            ws: usize,
+            chains: &[Vec<usize>],
+            referenced: &[FxHashSet<String>],
+            hosts: &FxHashMap<String, Vec<String>>,
+            seen: &mut FxHashSet<String>,
+        ) -> bool {
             if chains[ws].iter().any(|&c| referenced[c].contains(name)) {
                 return true;
             }
@@ -589,7 +736,9 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
                     continue;
                 }
             }
-            if ws_names.contains(name.as_str()) && modules_by_ws[ws].iter().any(|&mi| graph.modules[mi].edges.iter().any(|(_, r)| r.package.as_deref() == Some(name))) {
+            if ws_names.contains(name.as_str())
+                && modules_by_ws[ws].iter().any(|&mi| graph.modules[mi].edges.iter().any(|(_, r)| r.package.as_deref() == Some(name)))
+            {
                 continue;
             }
             let (line, col) = line_col(&w.manifest.text, *pos);
@@ -646,7 +795,15 @@ pub fn workflow_runs(text: &str) -> Vec<(Option<String>, String)> {
         let indent = line.len() - line.trim_start().len();
         let t = line.trim_start();
         let is_item = t.starts_with("- ");
-        if is_item && (step_indent.is_none() || indent <= step_indent.unwrap()) && (t.contains("run:") || t.contains("uses:") || t.contains("name:") || t.contains("id:") || t.contains("with:") || t.contains("working-directory:")) {
+        if is_item
+            && (step_indent.is_none() || indent <= step_indent.unwrap())
+            && (t.contains("run:")
+                || t.contains("uses:")
+                || t.contains("name:")
+                || t.contains("id:")
+                || t.contains("with:")
+                || t.contains("working-directory:"))
+        {
             step_indent = Some(indent);
             steps.push(vec![line]);
             continue;
