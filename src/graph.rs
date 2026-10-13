@@ -289,6 +289,21 @@ fn add_config_refs(facts: &mut FileFacts) {
             });
             continue;
         }
+        // vite `root: "./app"` → the html entry under that root
+        if facts.keyed_strings.iter().any(|(k, v)| k == "root" && v == &s) && !s.contains('*') {
+            let spec = format!("./{}/index.html", s.trim_start_matches("./").trim_end_matches('/'));
+            if !existing.contains(&spec) {
+                facts.imports.push(extract::Import {
+                    specifier: spec,
+                    kind: ImportKind::ConfigRef,
+                    is_type: false,
+                    names: Names::Named(vec![]),
+                    start: 0,
+                    line: 0,
+                    col: 0,
+                });
+            }
+        }
         let relative = s.starts_with("./") || s.starts_with("../");
         // bare file names like `test-setup.ts` or `src/setup.ts` are resolved relative to the config file
         let looks_like_file = !relative

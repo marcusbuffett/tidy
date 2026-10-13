@@ -17,6 +17,7 @@ mod project;
 mod report;
 mod resolve;
 mod scripts;
+mod tools;
 mod workspace;
 
 use anyhow::{Context, Result};

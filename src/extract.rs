@@ -196,13 +196,23 @@ pub fn component_script(path: &Path, source: &str) -> Option<String> {
         let tag = &source[open..open + tag_end];
         let body_start = open + tag_end + 1;
         let Some(close) = source[body_start..].find("</script") else { break };
+        // In html only `<script type="module">` is handled by the bundler; other scripts are static assets.
+        let is_module = tag.contains("type=\"module\"") || tag.contains("type='module'") || tag.contains("type=module");
+        if ext == "html" && !is_module {
+            i = body_start + close;
+            continue;
+        }
         if !tag.contains("src=") {
             out.push_str(&source[body_start..body_start + close]);
             out.push('\n');
         } else if let Some(src) = tag.split("src=").nth(1) {
             let q = src.chars().next().unwrap_or('"');
             let v: String = src.trim_start_matches(q).chars().take_while(|c| *c != q).collect();
-            out.push_str(&format!("import \"{v}\";\n"));
+            // `/src/main.ts` is relative to the vite root, which is where the html lives
+            let v = if ext == "html" && v.starts_with('/') && !v.starts_with("//") { format!(".{v}") } else { v };
+            if !v.contains("://") && !v.starts_with("//") {
+                out.push_str(&format!("import \"{v}\";\n"));
+            }
         }
         i = body_start + close;
         if i >= bytes.len() {
@@ -223,7 +233,7 @@ pub fn component_script(path: &Path, source: &str) -> Option<String> {
 }
 
 pub fn is_component_file(path: &Path) -> bool {
-    path.extension().and_then(|e| e.to_str()).map(|e| matches!(e, "svelte" | "vue" | "astro" | "mdx")).unwrap_or(false)
+    path.extension().and_then(|e| e.to_str()).map(|e| matches!(e, "svelte" | "vue" | "astro" | "mdx" | "html")).unwrap_or(false)
 }
 
 /// Cheap extraction for files outside the project (generated code, gitignored files reached via
@@ -1222,7 +1232,11 @@ impl<'s, 'a> Extractor<'s, 'a> {
                         }
                     }
                 } else if let Expression::ImportMeta(_) = &m.object {
-                    if prop == "glob" || prop == "globEager" {
+                    if prop == "resolve" {
+                        if let Some(spec) = first_string_arg(&call.arguments) {
+                            self.push_import(spec, ImportKind::Dynamic, false, Names::Named(vec![]), call.span.start);
+                        }
+                    } else if prop == "glob" || prop == "globEager" {
                         let mut globs = Vec::new();
                         match call.arguments.first() {
                             Some(Argument::ArrayExpression(a)) => {

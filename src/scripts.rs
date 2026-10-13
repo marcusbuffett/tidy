@@ -541,6 +541,11 @@ fn tokenize_inner(script: &str, subs: &mut Vec<String>) -> Vec<String> {
     tokens
 }
 
+/// Commands of a shell script line as argv vectors (`a && b | c` → three commands).
+pub fn commands_of(script: &str) -> Vec<Vec<String>> {
+    split_commands(tokenize(script))
+}
+
 fn split_commands(tokens: Vec<String>) -> Vec<Vec<String>> {
     let mut cmds: Vec<Vec<String>> = vec![vec![]];
     let mut i = 0;
@@ -586,6 +591,8 @@ pub struct ScriptUse {
     pub files: Vec<String>,
     /// Packages referenced by path (`node_modules/<pkg>`) or by well-known flags.
     pub packages: Vec<String>,
+    /// `<binary> --config <file>` pairs: the file is a config file of that tool.
+    pub configs: Vec<(String, String)>,
 }
 
 /// (binary, argument) pairs implying an extra package.
@@ -921,6 +928,14 @@ impl Ctx<'_> {
                 if let Some(v) = args.get(i + 1) {
                     self.file_ref(v);
                     self.node_modules_ref(v);
+                    if matches!(a, "--config" | "-c") {
+                        if let Some(bin) = args.first() {
+                            let pair = (bin.clone(), v.trim_start_matches("./").to_string());
+                            if !self.out.configs.contains(&pair) {
+                                self.out.configs.push(pair);
+                            }
+                        }
+                    }
                     if matches!(a, "--require" | "-r" | "--import" | "--loader" | "--experimental-loader" | "--preload") {
                         if let Some(pkg) = crate::resolve::package_name(v) {
                             if !self.out.packages.contains(&pkg) {
@@ -1023,10 +1038,6 @@ pub fn analyze(manifest: &Manifest, dir: &Path) -> ScriptUse {
         }
     }
     ctx.out
-}
-
-pub fn script_file_refs(manifest: &Manifest, dir: &Path) -> Vec<String> {
-    analyze(manifest, dir).files
 }
 
 /// Parse shell-ish files (husky hooks, GitHub workflow `run:` lines) for binaries.

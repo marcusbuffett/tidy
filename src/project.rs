@@ -99,6 +99,13 @@ fn walk(root: &Path) -> Vec<PathBuf> {
     v
 }
 
+/// knip marks production patterns with a trailing `!` (`"src/index.ts!"`). Outside production mode
+/// the suffix is just stripped; in production mode only the `!` patterns remain (when any exist).
+fn production_patterns(patterns: Vec<String>, production: bool) -> Vec<String> {
+    let has_prod = patterns.iter().any(|p| p.ends_with('!'));
+    patterns.into_iter().filter(|p| !production || !has_prod || p.ends_with('!')).map(|p| p.strip_suffix('!').map(str::to_string).unwrap_or(p)).collect()
+}
+
 fn rel_posix(root: &Path, p: &Path) -> String {
     p.strip_prefix(root).unwrap_or(p).to_string_lossy().replace('\\', "/")
 }
@@ -123,13 +130,30 @@ fn ws_config<'c>(cfg: &'c RawConfig, ws: &Workspace) -> Option<&'c RawWorkspaceC
     None
 }
 
+const NODE_TEST_PATTERNS: &[&str] = &[
+    "**/*{.,-,_}test.{cjs,mjs,js,cts,mts,ts}",
+    "**/test-*.{cjs,mjs,js,cts,mts,ts}",
+    "**/test.{cjs,mjs,js,cts,mts,ts}",
+    "**/test/**/*.{cjs,mjs,js,cts,mts,ts}",
+];
+const BUN_TEST_PATTERNS: &[&str] = &["**/*.{test,spec}.{js,jsx,ts,tsx}", "**/*_{test,spec}.{js,jsx,ts,tsx}"];
+
+/// Does any package.json script of this workspace (or the root) run `<bin> <arg>`?
+fn has_script_command(ws: &Workspace, workspaces: &[Workspace], bin: &str, arg: &str) -> bool {
+    [ws, &workspaces[0]].iter().any(|w| {
+        w.manifest.scripts.iter().any(|(_, script)| {
+            crate::scripts::commands_of(script).iter().any(|cmd| cmd.first().map(|b| b == bin).unwrap_or(false) && cmd.iter().skip(1).any(|a| a == arg))
+        })
+    })
+}
+
 fn tool_enabled(tool: &Tool, ws_idx: usize, workspaces: &[Workspace]) -> bool {
     let mut cur = Some(ws_idx);
     while let Some(i) = cur {
         let m = &workspaces[i].manifest;
         for e in tool.enablers {
-            if let Some(prefix) = e.strip_suffix('/') {
-                if m.dep_names().any(|n| n.starts_with(prefix) && n.len() > prefix.len() && n.as_bytes()[prefix.len()] == b'/') {
+            if e.ends_with('/') || e.ends_with('-') {
+                if m.dep_names().any(|n| n.starts_with(e) && n.len() > e.len()) {
                     return true;
                 }
             } else if m.has_dep(e) {
@@ -291,9 +315,11 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
     for (wi, ws) in workspaces.iter().enumerate() {
         let wcfg = ws_config(cfg, ws);
         let root_cfg = &cfg.root;
-        let entry: Vec<String> = wcfg.and_then(|c| c.entry.as_ref()).map(|s| s.to_vec()).unwrap_or_else(|| default_entry.clone());
+        let entry: Vec<String> =
+            production_patterns(wcfg.and_then(|c| c.entry.as_ref()).map(|s| s.to_vec()).unwrap_or_else(|| default_entry.clone()), production);
         let mut tool_entry: Vec<String> = Vec::new();
-        let mut project: Vec<String> = wcfg.and_then(|c| c.project.as_ref()).map(|s| s.to_vec()).unwrap_or_else(|| default_project.clone());
+        let mut project: Vec<String> =
+            production_patterns(wcfg.and_then(|c| c.project.as_ref()).map(|s| s.to_vec()).unwrap_or_else(|| default_project.clone()), production);
         // single-file components when the framework is present (knip "compilers")
         for (dep, pat) in [("svelte", "**/*.svelte"), ("vue", "**/*.vue"), ("astro", "**/*.astro"), ("@mdx-js/mdx", "**/*.mdx")] {
             let mut cur = Some(wi);
@@ -309,7 +335,7 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
                 project.push(pat.to_string());
             }
         }
-        let mut ignore: Vec<String> = match wcfg {
+        let ignore: Vec<String> = match wcfg {
             Some(c) if !std::ptr::eq(c, root_cfg) => c.ignore.as_ref().map(|s| s.to_vec()).unwrap_or_default(),
             _ => vec![],
         };
@@ -332,23 +358,40 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
             if ov.map(|o| o.disabled).unwrap_or(false) {
                 continue;
             }
-            let enabled = tool_enabled(tool, wi, workspaces)
-                || (tool.enablers.is_empty() && config_present[wi].contains(&ti))
-                || ov.map(|o| !o.disabled).unwrap_or(false);
+            // knip enables a few plugins from the environment rather than from dependencies
+            let (enabled, test_entries) = match tool.name {
+                "node" => (true, has_script_command(ws, workspaces, "node", "--test")),
+                "bun" => (
+                    ws.dir.join("bun.lock").is_file() || ws.dir.join("bun.lockb").is_file() || has_script_command(ws, workspaces, "bun", "test"),
+                    has_script_command(ws, workspaces, "bun", "test"),
+                ),
+                _ => (
+                    tool_enabled(tool, wi, workspaces)
+                        || (tool.enablers.is_empty() && config_present[wi].contains(&ti))
+                        || ov.map(|o| !o.disabled).unwrap_or(false),
+                    true,
+                ),
+            };
             if !enabled {
-                continue;
-            }
-            if production && tool.dev {
                 continue;
             }
             enabled_tools.push(ti);
             let cfg_pats: Vec<String> = ov.and_then(|o| o.config.clone()).unwrap_or_else(|| tool.config.iter().map(|s| s.to_string()).collect());
-            let entry_pats: Vec<String> = ov.and_then(|o| o.entry.clone()).unwrap_or_else(|| tool.entry.iter().map(|s| s.to_string()).collect());
+            let mut entry_pats: Vec<String> = ov.and_then(|o| o.entry.clone()).unwrap_or_else(|| tool.entry.iter().map(|s| s.to_string()).collect());
+            if tool.name == "node" && test_entries {
+                entry_pats.extend(NODE_TEST_PATTERNS.iter().map(|s| s.to_string()));
+            }
+            if tool.name == "bun" && test_entries {
+                entry_pats.extend(BUN_TEST_PATTERNS.iter().map(|s| s.to_string()));
+            }
             config.extend(cfg_pats);
-            if tool.dev {
-                dev_entry.extend(entry_pats);
+            if tool.name == "node" {
+                // `server.js` is a production entry; the test patterns are not
+                tool_entry.extend(tool.production.iter().chain(tool.entry.iter()).map(|s| s.to_string()));
+                dev_entry.extend(entry_pats.into_iter().filter(|p| !tool.entry.contains(&p.as_str())));
             } else {
-                tool_entry.extend(entry_pats);
+                dev_entry.extend(entry_pats);
+                tool_entry.extend(tool.production.iter().map(|s| s.to_string()));
             }
             if let Some(p) = ov.and_then(|o| o.project.clone()) {
                 project.extend(p);
@@ -363,8 +406,23 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
                 exact_entries.insert(m);
             }
         }
-        for s in scripts::script_file_refs(&ws.manifest, &ws.dir) {
+        let script_use = scripts::analyze(&ws.manifest, &ws.dir);
+        for s in script_use.files {
             exact_entries.insert(s);
+        }
+        // `vite build --config vite.native.ts`: the file is a config file of that tool
+        for (bin, file) in &script_use.configs {
+            let tool_name = match bin.as_str() {
+                "tsc" => "typescript",
+                "tailwindcss" => "tailwind",
+                b => b,
+            };
+            if let Some(ti) = TOOLS.iter().position(|t| t.name == tool_name) {
+                if ws.dir.join(file).is_file() {
+                    config.push(file.clone());
+                    config_present[wi].insert(ti);
+                }
+            }
         }
         for name in ["tidy.ts", "tidy.js", "knip.ts", "knip.js", "knip.mjs", "knip.config.ts", "knip.config.js"] {
             if ws.dir.join(name).is_file() {
@@ -386,12 +444,13 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
                 }
             }
         }
-        ignore.retain(|p| !p.is_empty());
+        let ignore: Vec<String> = ignore.into_iter().filter(|p| !p.is_empty()).map(|p| p.strip_suffix('!').map(str::to_string).unwrap_or(p)).collect();
         let mut ignore_dependencies = crate::config::matchers(&root_cfg.ignore_dependencies);
         let mut ignore_binaries = crate::config::matchers(&root_cfg.ignore_binaries);
         let mut ignore_unresolved = crate::config::matchers(&root_cfg.ignore_unresolved);
         if let Some(c) = wcfg {
-            if ws.rel != "." {
+            // `workspaces["."]` is a distinct object from the root-level keys; both apply to the root.
+            if !std::ptr::eq(c, root_cfg) {
                 ignore_dependencies.extend(crate::config::matchers(&c.ignore_dependencies));
                 ignore_binaries.extend(crate::config::matchers(&c.ignore_binaries));
                 ignore_unresolved.extend(crate::config::matchers(&c.ignore_unresolved));

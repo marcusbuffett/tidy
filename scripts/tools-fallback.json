@@ -1,0 +1,227 @@
+{
+ "bun": {
+  "entry": [
+   "**/*.{test,spec}.{js,jsx,ts,tsx}",
+   "**/*_{test,spec}.{js,jsx,ts,tsx}"
+  ],
+  "production": []
+ },
+ "webdriverio": {
+  "enablers": [
+   "@wdio/cli"
+  ],
+  "config": [
+   "wdio.conf.{js,ts}"
+  ],
+  "entry": [
+   "**/*.{e2e,spec,test}.{js,ts}"
+  ],
+  "production": []
+ },
+ "next": {
+  "entry": [],
+  "production": [
+   "{instrumentation,instrumentation-client,middleware,proxy}.{js,ts}",
+   "app/{,[(]*[)]/}{manifest,robots}.{js,ts}",
+   "app/**/sitemap.{js,ts}",
+   "app/**/{icon,apple-icon,opengraph-image,twitter-image}.{js,jsx,ts,tsx}",
+   "app/global-{error,not-found}.{js,jsx,ts,tsx}",
+   "app/**/{default,error,forbidden,loading,not-found,unauthorized}.{js,jsx,ts,tsx}",
+   "app/**/{layout,page,route,template}.{js,jsx,ts,tsx}",
+   "pages/**/*.{js,jsx,ts,tsx}",
+   "src/{instrumentation,instrumentation-client,middleware,proxy}.{js,ts}",
+   "src/app/{,[(]*[)]/}{manifest,robots}.{js,ts}",
+   "src/app/**/sitemap.{js,ts}",
+   "src/app/**/{icon,apple-icon,opengraph-image,twitter-image}.{js,jsx,ts,tsx}",
+   "src/app/global-{error,not-found}.{js,jsx,ts,tsx}",
+   "src/app/**/{default,error,forbidden,loading,not-found,unauthorized}.{js,jsx,ts,tsx}",
+   "src/app/**/{layout,page,route,template}.{js,jsx,ts,tsx}",
+   "src/pages/**/*.{js,jsx,ts,tsx}"
+  ]
+ },
+ "remix": {
+  "config": [
+   "remix.config.js",
+   "vite.config.{js,ts}"
+  ]
+ },
+ "react-router": {
+  "entry": [],
+  "production": [
+   "app/root.{jsx,tsx}",
+   "app/routes.{js,ts}",
+   "app/entry.{client,server}.{js,jsx,ts,tsx}",
+   "app/routes/**/*.{js,jsx,ts,tsx}",
+   "server.{js,ts}"
+  ]
+ },
+ "expo": {
+  "entry": [],
+  "production": [
+   "index.{js,jsx,ts,tsx}",
+   "App.{js,jsx,ts,tsx}",
+   "app/**/*.{js,jsx,ts,tsx}",
+   "src/app/**/*.{js,jsx,ts,tsx}",
+   "metro.config.js",
+   "babel.config.js",
+   "expo-env.d.ts"
+  ]
+ },
+ "react-native": {
+  "entry": [],
+  "production": [
+   "index.{js,jsx,ts,tsx}",
+   "App.{js,jsx,ts,tsx}"
+  ]
+ },
+ "astro": {
+  "entry": [],
+  "production": [
+   "src/content/config.{js,ts}",
+   "src/content.config.{js,ts}",
+   "src/pages/**/*.{astro,mdx,js,ts}",
+   "src/middleware.{js,ts}",
+   "src/actions/index.{js,ts}",
+   "src/content/**/*.mdx"
+  ]
+ },
+ "sveltekit": {
+  "entry": [],
+  "production": [
+   "src/hooks.{server,client}.{js,ts}",
+   "src/hooks.{js,ts}",
+   "src/params/*.{js,ts}",
+   "src/routes/**/+*.{js,ts,svelte}",
+   "src/service-worker.{js,ts}",
+   "src/app.html"
+  ]
+ },
+ "vitepress": {
+  "config": [
+   ".vitepress/config.{js,ts,mjs,mts}"
+  ]
+ },
+ "nest": {
+  "entry": [],
+  "production": [
+   "src/main.ts"
+  ]
+ },
+ "electron": {
+  "enablers": [
+   "electron"
+  ],
+  "config": [
+   "electron-builder.{yml,yaml,json}",
+   "electron.vite.config.{js,ts,mjs,mts}",
+   "forge.config.{js,ts}"
+  ],
+  "entry": [],
+  "production": []
+ },
+ "vite": {
+  "entry": [],
+  "production": [
+   "index.html"
+  ]
+ },
+ "tailwind": {
+  "config": [
+   "tailwind.config.{js,cjs,mjs,ts}"
+  ]
+ },
+ "lefthook": {
+  "config": [
+   "lefthook.yml",
+   "lefthook-local.yml",
+   ".lefthook.yml"
+  ]
+ },
+ "nodemon": {
+  "config": [
+   "nodemon.json"
+  ]
+ },
+ "vercel": {
+  "config": [
+   "vercel.json"
+  ]
+ },
+ "hardhat": {
+  "config": [
+   "hardhat.config.{js,cjs,mjs,ts}"
+  ]
+ },
+ "turbo": {
+  "config": [
+   "turbo.json"
+  ]
+ },
+ "svgo": {
+  "config": [
+   "svgo.config.{js,cjs,mjs}"
+  ]
+ },
+ "plop": {
+  "config": [
+   "plopfile.{cjs,mjs,js,ts}"
+  ]
+ },
+ "oclif": {
+  "config": [
+   ".oclifrc",
+   "oclif.config.{js,ts}"
+  ]
+ },
+ "angular": {
+  "entry": [],
+  "production": [
+   "src/main.ts",
+   "src/polyfills.ts"
+  ]
+ },
+ "karma": {
+  "config": [
+   "karma.conf.{js,cjs,mjs,ts}"
+  ]
+ },
+ "vike": {
+  "config": [
+   "pages/**/+config.{js,ts}",
+   "renderer/+config.{js,ts}"
+  ]
+ },
+ "changelogen": {
+  "config": [
+   "changelog.config.{json,js,cjs,mjs,ts}"
+  ]
+ },
+ "bumpp": {
+  "config": [
+   "bump.config.{js,ts,mjs,mts}"
+  ]
+ },
+ "danger": {
+  "config": [
+   "dangerfile.{js,ts}"
+  ]
+ },
+ "mdx": {
+  "entry": [],
+  "production": [
+   "**/*.mdx"
+  ]
+ },
+ "starlight": {
+  "entry": [],
+  "production": [
+   "src/content/docs/**/*.{md,mdx}"
+  ]
+ },
+ "zx": {
+  "entry": [],
+  "production": [
+   "**/*.mjs"
+  ]
+ }
+}

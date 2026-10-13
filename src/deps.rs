@@ -520,7 +520,7 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
         let setup = &setups[ws];
         for &ti in &setup.tools_with_config {
             for e in crate::patterns::TOOLS[ti].enablers {
-                if e.ends_with('/') {
+                if e.ends_with('/') || e.ends_with('-') {
                     continue;
                 }
                 if let Some(c) = closest(ws, e) {

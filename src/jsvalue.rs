@@ -78,6 +78,8 @@ fn eval(e: &Expression, bindings: &FxHashMap<String, &Expression>, depth: usize)
         Expression::NumericLiteral(n) => Some(serde_json::json!(n.value)),
         Expression::BooleanLiteral(b) => Some(Value::Bool(b.value)),
         Expression::NullLiteral(_) => Some(Value::Null),
+        // `/^@org\/.*/` in ignoreDependencies etc.: keep the source form, matchers parse `/.../`
+        Expression::RegExpLiteral(r) => Some(Value::String(format!("/{}/", r.regex.pattern.text))),
         Expression::ArrayExpression(a) => {
             let mut out = Vec::new();
             for el in &a.elements {
