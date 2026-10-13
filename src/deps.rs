@@ -228,6 +228,8 @@ struct Installed {
     peers: Vec<String>,
     has_types: bool,
     bins: Vec<String>,
+    /// Native platforms of a Capacitor plugin (`"capacitor": {"ios": ..., "android": ...}`).
+    capacitor_platforms: Vec<String>,
 }
 
 struct InstalledCache {
@@ -267,7 +269,8 @@ impl InstalledCache {
                     Some(serde_json::Value::Object(o)) => o.keys().cloned().collect(),
                     _ => vec![],
                 };
-                let v = std::sync::Arc::new(Installed { peers, has_types, bins });
+                let capacitor_platforms = json.get("capacitor").and_then(|c| c.as_object()).map(|o| o.keys().cloned().collect()).unwrap_or_default();
+                let v = std::sync::Arc::new(Installed { peers, has_types, bins, capacitor_platforms });
                 self.map.lock().unwrap().insert(pj, v.clone());
                 return Some(v);
             }
@@ -576,9 +579,15 @@ pub fn analyze(project: &Project, graph: &Graph, workspaces: &[Workspace], setup
         for &ti in &setup.enabled_tools {
             match crate::patterns::TOOLS[ti].name {
                 "capacitor" => {
-                    for (dir, pkg) in [("android", "@capacitor/android"), ("ios", "@capacitor/ios")] {
-                        if w.dir.join(dir).is_dir() {
-                            packages.push(pkg.into());
+                    let platforms: Vec<&str> = ["android", "ios"].into_iter().filter(|p| w.dir.join(p).is_dir()).collect();
+                    for p in &platforms {
+                        packages.push(format!("@capacitor/{p}"));
+                    }
+                    // `cap sync` links every installed plugin into the native projects, imported or not.
+                    for dep in w.manifest.dep_names() {
+                        let native = installed.get(&w.dir, dep).is_some_and(|i| i.capacitor_platforms.iter().any(|p| platforms.contains(&p.as_str())));
+                        if native {
+                            packages.push(dep.to_string());
                         }
                     }
                 }

@@ -354,11 +354,20 @@ pub fn build(root: &Path, cfg: &RawConfig, workspaces: &[Workspace], production:
         let mut project: Vec<String> =
             production_patterns(wcfg.and_then(|c| c.project.as_ref()).map(|s| s.to_vec()).unwrap_or_else(|| default_project.clone()), production);
         // single-file components when the framework is present (knip "compilers")
-        for (dep, pat) in [("svelte", "**/*.svelte"), ("vue", "**/*.vue"), ("astro", "**/*.astro"), ("@mdx-js/mdx", "**/*.mdx")] {
+        // and stylesheets when tailwind compiles them (`@import`/`@plugin` name packages)
+        for (dep, pat) in [
+            ("svelte", "**/*.svelte"),
+            ("vue", "**/*.vue"),
+            ("astro", "**/*.astro"),
+            ("@mdx-js/mdx", "**/*.mdx"),
+            ("tailwindcss", "**/*.css"),
+            ("@tailwindcss/", "**/*.css"),
+        ] {
             let mut cur = Some(wi);
             let mut present = false;
             while let Some(i) = cur {
-                if workspaces[i].manifest.has_dep(dep) {
+                let m = &workspaces[i].manifest;
+                if m.has_dep(dep) || (dep.ends_with('/') && m.dep_names().any(|d| d.starts_with(dep))) {
                     present = true;
                     break;
                 }

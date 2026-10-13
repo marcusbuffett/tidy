@@ -54,7 +54,7 @@ in the knip repository with the issue counts its test asserts.
 | imports | 18 | 50% |
 | types | 23 | 48% |
 | resolution | 33 | 30% |
-| plugins (195 tool integrations) | 437 | 33% |
+| plugins (195 tool integrations) | 437 | 34% |
 | **all runnable tests** | **721** | **38%** |
 
 The failing tests are almost all of one kind: knip ships a hand-written plugin
@@ -153,6 +153,20 @@ scripts and GitHub workflows, `--config` arguments of tool binaries in scripts,
 tsconfig, and the entry/config conventions of knip's 195 plugins
 (`src/tools.rs`, generated from knip's sources by `scripts/gen-tools.py`).
 
+Beyond knip:
+
+- Stylesheets are followed when they are project files (tailwind in the
+  dependencies adds `**/*.css` to the default project, as knip's css compiler
+  does): `@import`, `@plugin`, `@reference` and `@config` credit packages and
+  reach other stylesheets, and `<link rel="stylesheet">` in html entries counts
+  as an import. A bare `@import "x.css"` is relative when the sibling exists.
+- With `ios/` or `android/` present, every dependency whose `package.json` has
+  a `capacitor` section for that platform is used: `cap sync` links it into the
+  native project whether or not any code imports it.
+- Exports of generated files (a leading comment containing `@generated`, or
+  "generated" and "DO NOT EDIT") are never reported; the file itself still is
+  when nothing imports it.
+
 ## Not supported
 
 - Dependencies that only appear inside tool configuration under tool-specific
@@ -162,7 +176,7 @@ tsconfig, and the entry/config conventions of knip's 195 plugins
   `catalog`, `nsExports`/`nsTypes` issue types, custom compilers.
 - `classMembers` uses static member access only (knip uses the type checker).
 - `.svelte`, `.vue`, `.astro` and `.mdx` files get script-block extraction only;
-  CSS preprocessors are not analysed.
+  CSS preprocessors (`.scss`, `.less`) are not analysed.
 
 ## Development
 

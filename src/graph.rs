@@ -44,7 +44,7 @@ pub struct Timings {
 }
 
 fn is_code(path: &Path) -> bool {
-    path.to_str().map(is_source_ext).unwrap_or(false) || extract::is_component_file(path)
+    path.to_str().map(is_source_ext).unwrap_or(false) || extract::is_component_file(path) || extract::is_css_file(path)
 }
 
 /// (key, string) pairs of a JSON document: `"ignorePatterns": ["src/gen.ts"]` → ("ignorePatterns", "src/gen.ts").
@@ -215,7 +215,12 @@ pub fn build(project: &Project, resolvers: &Resolvers, workspaces_dirs: &[PathBu
             .map(|p| {
                 let t = std::time::Instant::now();
                 let facts =
-                    if is_code(&p) { std::fs::read_to_string(&p).map(|s| extract::extract_light(&p, &s)).unwrap_or_default() } else { FileFacts::default() };
+                    // Stylesheets are only followed when they are project files (knip's css compiler).
+                    if is_code(&p) && !extract::is_css_file(&p) {
+                        std::fs::read_to_string(&p).map(|s| extract::extract_light(&p, &s)).unwrap_or_default()
+                    } else {
+                        FileFacts::default()
+                    };
                 let ms = t.elapsed().as_secs_f64() * 1000.0;
                 if ms > 3.0 && std::env::var_os("TIDY_DEBUG_PARSE").is_some() {
                     eprintln!("slow parse {ms:.1}ms {} ({} bytes)", p.display(), std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0));

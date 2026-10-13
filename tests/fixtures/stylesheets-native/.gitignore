@@ -1,0 +1,2 @@
+# keep node_modules fixtures (fake packages) tracked
+!node_modules

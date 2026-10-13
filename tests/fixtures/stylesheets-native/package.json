@@ -1,0 +1,17 @@
+{
+  "name": "stylesheets-native",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync-watch": "watchexec -w dist -- echo synced"
+  },
+  "dependencies": {
+    "@capacitor/status-bar": "*",
+    "@fontsource/inter": "*",
+    "unused-dep": "*"
+  },
+  "devDependencies": {
+    "tailwindcss": "*",
+    "vite": "*"
+  }
+}

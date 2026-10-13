@@ -231,6 +231,7 @@ pub const SYSTEM_BINARIES: &[&str] = &[
     "tput",
     "stty",
     "watch",
+    "watchexec",
     "timeout",
     "yes",
     "no",

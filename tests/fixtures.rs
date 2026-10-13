@@ -29,3 +29,8 @@ fn run_fixture(name: &str) {
 fn basic() {
     run_fixture("basic");
 }
+
+#[test]
+fn stylesheets_native() {
+    run_fixture("stylesheets-native");
+}

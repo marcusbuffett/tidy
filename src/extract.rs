@@ -221,6 +221,24 @@ pub fn component_script(path: &Path, source: &str) -> Option<String> {
             break;
         }
     }
+    if ext == "html" {
+        // vite bundles `<link rel="stylesheet" href="/src/x.css">` like a module script
+        let mut i = 0;
+        while let Some(start) = source[i..].find("<link") {
+            let open = i + start;
+            let Some(tag_end) = source[open..].find('>') else { break };
+            let tag = &source[open..open + tag_end];
+            i = open + tag_end;
+            if attr(tag, "rel").is_some_and(|r| r.split_ascii_whitespace().any(|r| r == "stylesheet")) {
+                if let Some(href) = attr(tag, "href") {
+                    let v = if href.starts_with('/') && !href.starts_with("//") { format!(".{href}") } else { href.to_string() };
+                    if !v.contains("://") && !v.starts_with("//") {
+                        out.push_str(&format!("import \"{v}\";\n"));
+                    }
+                }
+            }
+        }
+    }
     if ext == "mdx" {
         // top-level `import`/`export` lines in MDX
         for line in source.lines() {
@@ -232,6 +250,85 @@ pub fn component_script(path: &Path, source: &str) -> Option<String> {
         }
     }
     Some(out)
+}
+
+/// Value of an html attribute (`rel="stylesheet"`, `rel='x'` or `rel=x`) in a tag's source.
+fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let mut rest = tag;
+    while let Some(p) = rest.find(name) {
+        let before_ok = rest[..p].chars().next_back().is_some_and(|c| c.is_ascii_whitespace());
+        let after = rest[p + name.len()..].trim_start();
+        rest = &rest[p + name.len()..];
+        let Some(value) = after.strip_prefix('=').filter(|_| before_ok) else { continue };
+        let value = value.trim_start();
+        return match value.chars().next() {
+            Some(q @ ('"' | '\'')) => value[1..].split(q).next(),
+            _ => value.split(|c: char| c.is_ascii_whitespace() || c == '/').next(),
+        };
+    }
+    None
+}
+
+pub fn is_css_file(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e == "css")
+}
+
+/// Imports of a stylesheet: `@import`, and tailwind's `@plugin`, `@reference` and `@config`, each
+/// with a quoted string or `url(...)`. A bare `@import "x.css"` is relative in CSS, so it resolves
+/// to a sibling file when one exists and to a package otherwise (as postcss-import does).
+pub fn extract_css(path: &Path, source: &str) -> FileFacts {
+    let mut facts = FileFacts::default();
+    let lines = LineIndex::new(source);
+    let dir = path.parent();
+    let mut i = 0;
+    while let Some(p) = source[i..].find(['@', '/']) {
+        let at = i + p;
+        let rest = &source[at..];
+        if rest.starts_with("/*") {
+            i = rest.find("*/").map_or(source.len(), |e| at + e + 2);
+            continue;
+        }
+        i = at + 1;
+        let Some(rule) = ["@import", "@plugin", "@reference", "@config"].into_iter().find(|r| rest.starts_with(r)) else { continue };
+        let args = &rest[rule.len()..];
+        if !args.starts_with(|c: char| c.is_ascii_whitespace() || c == '"' || c == '\'' || c == 'u') {
+            continue;
+        }
+        let args = args.trim_start();
+        let args = args.strip_prefix("url(").map(str::trim_start).unwrap_or(args);
+        let spec = match args.chars().next() {
+            Some(q @ ('"' | '\'')) => args[1..].split(q).next(),
+            _ => args.split([')', ';', ' ', '\n']).next(),
+        };
+        let Some(spec) = spec.filter(|s| !s.is_empty()) else { continue };
+        if spec.contains("://") || spec.starts_with("//") || spec.starts_with("data:") {
+            continue;
+        }
+        let relative = !spec.starts_with(['.', '/', '~', '#', '@']) && dir.is_some_and(|d| d.join(spec).is_file());
+        let specifier = if relative { format!("./{spec}") } else { spec.to_string() };
+        let (line, col) = lines.line_col(at as u32);
+        facts.imports.push(Import { specifier, kind: ImportKind::Static, is_type: false, names: Names::Named(vec![]), start: at as u32, line, col });
+    }
+    facts
+}
+
+/// Generated files (a leading comment with `@generated`, or "generated" and "do not edit") are an
+/// API surface for whoever generated them: their exports are never reported.
+fn is_generated(source: &str) -> bool {
+    for line in source.lines().take(20) {
+        let l = line.trim();
+        if l.is_empty() {
+            continue;
+        }
+        if !(l.starts_with("//") || l.starts_with("/*") || l.starts_with('*') || l.starts_with("#!")) {
+            return false;
+        }
+        let l = l.to_ascii_lowercase();
+        if l.contains("@generated") || (l.contains("generated") && l.contains("do not edit")) {
+            return true;
+        }
+    }
+    false
 }
 
 pub fn is_component_file(path: &Path) -> bool {
@@ -408,8 +505,17 @@ pub fn extract(path: &Path, source: &str, collect_strings: bool) -> FileFacts {
         }
         return facts;
     }
+    if is_css_file(path) {
+        return extract_css(path, source);
+    }
     let Some(source_type) = source_type_for(path) else { return FileFacts::default() };
-    extract_source(source, source_type, collect_strings)
+    let mut facts = extract_source(source, source_type, collect_strings);
+    if is_generated(source) {
+        for e in &mut facts.exports {
+            e.tags.push("public".into());
+        }
+    }
+    facts
 }
 
 fn extract_source(source: &str, source_type: SourceType, collect_strings: bool) -> FileFacts {
