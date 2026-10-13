@@ -1,0 +1,40 @@
+[package]
+name = "tidy"
+version = "0.1.0"
+edition = "2021"
+description = "Fast dead-code, unused-export and unused-dependency finder for TypeScript/JavaScript projects"
+default-run = "tidy"
+
+[[bin]]
+name = "tidy"
+path = "src/main.rs"
+
+[dependencies]
+oxc_allocator = "0.154"
+oxc_parser = "0.154"
+oxc_ast = "0.154"
+oxc_ast_visit = "0.154"
+oxc_semantic = "0.154"
+oxc_span = "0.154"
+oxc_syntax = "0.154"
+oxc_resolver = "11"
+rayon = "1"
+ignore = "0.4"
+globset = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+json5 = "0.4"
+serde_yaml = "0.9"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+rustc-hash = "2"
+memchr = "2"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+opt-level = 1
